@@ -1386,6 +1386,8 @@ struct mgmt_be_client *mgmt_be_client_create(const char *client_name,
 {
 	struct mgmt_be_client *client;
 	char server_path[MAXPATHLEN];
+	char client_name_inst[MAXPATHLEN];
+	unsigned short instance = frr_get_instance();
 
 	if (__be_client)
 		return NULL;
@@ -1396,7 +1398,13 @@ struct mgmt_be_client *mgmt_be_client_create(const char *client_name,
 	/* Only call after frr_init() */
 	assert(running_config);
 
-	client->name = XSTRDUP(MTYPE_MGMTD_BE_CLIENT_NAME, client_name);
+	if (instance) {
+		snprintf(client_name_inst, sizeof(client_name_inst), "%s-%u", client_name,
+			 instance);
+		client->name = XSTRDUP(MTYPE_MGMTD_BE_CLIENT_NAME, client_name_inst);
+	} else {
+		client->name = XSTRDUP(MTYPE_MGMTD_BE_CLIENT_NAME, client_name);
+	}
 	client->running_config = running_config;
 	// client->candidate_config = vty_shared_candidate_config;
 	if (cbs)
