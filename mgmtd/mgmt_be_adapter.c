@@ -149,13 +149,7 @@ static ssize_t printfrr_be_mask(struct fbuf *buf, struct printfrr_eargs *ea, con
 /* XPath Mapping Functions */
 /* ======================= */
 
-/*
- * Check if either map_path or xpath is a prefix of the other along path
- * boundaries (i.e., either module name ending with ':' or path segment ending
- * with '/' or 0 byte). Before checking
- * the xpath is converted to a regular path string (i.e., removing predicates).
- */
-static bool mgmt_be_xpath_prefix(const char *map_path, const char *xpath)
+static bool mgmt_be_xpath_prefix_legacy(const char *map_path, const char *xpath)
 {
 	int xc, pc = 0;
 
@@ -168,14 +162,269 @@ static bool mgmt_be_xpath_prefix(const char *map_path, const char *xpath)
 		}
 		pc = *map_path++;
 		if (!pc)
-			/* pc is done, if xpath ends at a path separator, it's a match */
 			return (xc == '/' || xc == ':');
 		if (pc != xc)
 			return false;
 	}
 	pc = *map_path++;
-	/* if they are equal, or map_path ends at a path separator, it's a match */
 	return (!pc || pc == '/' || pc == ':');
+}
+
+static bool mgmt_be_xpath_boundary(char c)
+{
+	return c == '\0' || c == '/' || c == ':';
+}
+
+static bool mgmt_be_xpath_strip_predicates(const char *xpath, char *stripped, size_t stripped_len)
+{
+	const char *src;
+	char *dst = stripped;
+
+	for (src = xpath; *src && dst < stripped + stripped_len - 1; src++) {
+		if (*src == '[') {
+			src = frrstr_skip_over_char(src + 1, ']');
+			if (!src)
+				return false;
+			src--;
+			continue;
+		}
+		*dst++ = *src;
+	}
+	*dst = '\0';
+
+	if (*src) {
+		_log_warn("xpath too long after predicate stripping: %s", xpath);
+		return false;
+	}
+
+	return true;
+}
+
+static bool mgmt_be_xpath_stripped_prefix(const char *prefix, const char *path)
+{
+	size_t prefix_len = strlen(prefix);
+
+	return strncmp(prefix, path, prefix_len) == 0 && mgmt_be_xpath_boundary(path[prefix_len]);
+}
+
+static const char *mgmt_be_xpath_segment_end(const char *segment)
+{
+	const char *p;
+
+	for (p = segment; *p && *p != '/'; p++) {
+		if (*p == '[') {
+			p = frrstr_skip_over_char(p + 1, ']');
+			if (!p)
+				return NULL;
+			p--;
+		}
+	}
+
+	return p;
+}
+
+static size_t mgmt_be_xpath_segment_name_len(const char *segment)
+{
+	const char *p;
+
+	for (p = segment; *p && *p != '/' && *p != '['; p++)
+		;
+
+	return p - segment;
+}
+
+static bool mgmt_be_xpath_predicate_parse(const char *predicate, const char *segment_end,
+					  const char **key, size_t *key_len, const char **value,
+					  size_t *value_len, const char **next)
+{
+	const char *predicate_end;
+	const char *close;
+	const char *equals;
+	const char *value_start;
+	const char *value_end;
+
+	predicate_end = frrstr_skip_over_char(predicate + 1, ']');
+	if (!predicate_end || predicate_end > segment_end)
+		return false;
+
+	close = predicate_end - 1;
+	equals = memchr(predicate + 1, '=', close - predicate - 1);
+	if (!equals)
+		return false;
+
+	*key = predicate + 1;
+	*key_len = equals - *key;
+
+	value_start = equals + 1;
+	value_end = close;
+	if (value_start < value_end && (*value_start == '\'' || *value_start == '"')) {
+		char quote = *value_start;
+
+		value_start++;
+		value_end = memchr(value_start, quote, close - value_start);
+		if (!value_end)
+			return false;
+	}
+
+	*value = value_start;
+	*value_len = value_end - value_start;
+	*next = predicate_end;
+
+	return true;
+}
+
+static bool mgmt_be_xpath_find_predicate(const char *segment, const char *segment_end,
+					 const char *key, size_t key_len, const char **value,
+					 size_t *value_len, bool *found)
+{
+	const char *p = segment + mgmt_be_xpath_segment_name_len(segment);
+
+	*found = false;
+	while (p < segment_end) {
+		const char *predicate_key;
+		const char *predicate_value;
+		const char *next;
+		size_t predicate_key_len;
+		size_t predicate_value_len;
+
+		while (p < segment_end && *p != '[')
+			p++;
+		if (p >= segment_end)
+			return true;
+
+		if (!mgmt_be_xpath_predicate_parse(p, segment_end, &predicate_key,
+						   &predicate_key_len, &predicate_value,
+						   &predicate_value_len, &next))
+			return false;
+
+		if (predicate_key_len == key_len && strncmp(predicate_key, key, key_len) == 0) {
+			*value = predicate_value;
+			*value_len = predicate_value_len;
+			*found = true;
+			return true;
+		}
+
+		p = next;
+	}
+
+	return true;
+}
+
+static bool mgmt_be_xpath_segment_predicates_compatible(const char *map_segment,
+							const char *map_end,
+							const char *xpath_segment,
+							const char *xpath_end)
+{
+	const char *p = map_segment + mgmt_be_xpath_segment_name_len(map_segment);
+
+	while (p < map_end) {
+		const char *map_key;
+		const char *map_value;
+		const char *xpath_value;
+		const char *next;
+		size_t map_key_len;
+		size_t map_value_len;
+		size_t xpath_value_len;
+		bool found;
+
+		while (p < map_end && *p != '[')
+			p++;
+		if (p >= map_end)
+			return true;
+
+		if (!mgmt_be_xpath_predicate_parse(p, map_end, &map_key, &map_key_len, &map_value,
+						   &map_value_len, &next))
+			return false;
+
+		if (!mgmt_be_xpath_find_predicate(xpath_segment, xpath_end, map_key, map_key_len,
+						  &xpath_value, &xpath_value_len, &found))
+			return false;
+
+		if (found && (map_value_len != xpath_value_len ||
+			      strncmp(map_value, xpath_value, map_value_len) != 0))
+			return false;
+
+		p = next;
+	}
+
+	return true;
+}
+
+static bool mgmt_be_xpath_predicates_compatible(const char *map_path, const char *xpath)
+{
+	const char *map = map_path;
+	const char *path = xpath;
+
+	while (*map == '/')
+		map++;
+	while (*path == '/')
+		path++;
+
+	while (*map && *path) {
+		const char *map_end;
+		const char *path_end;
+		size_t map_name_len;
+		size_t path_name_len;
+
+		map_end = mgmt_be_xpath_segment_end(map);
+		path_end = mgmt_be_xpath_segment_end(path);
+		if (!map_end || !path_end)
+			return false;
+
+		map_name_len = mgmt_be_xpath_segment_name_len(map);
+		path_name_len = mgmt_be_xpath_segment_name_len(path);
+		/* The stripped paths are already known to share a prefix.  A
+		 * different segment name means we have reached the first segment
+		 * beyond that shared prefix, so there are no more predicates in
+		 * the registered map path that can constrain this match.
+		 */
+		if (map_name_len != path_name_len || strncmp(map, path, map_name_len) != 0)
+			return true;
+
+		if (!mgmt_be_xpath_segment_predicates_compatible(map, map_end, path, path_end))
+			return false;
+
+		map = *map_end == '/' ? map_end + 1 : map_end;
+		path = *path_end == '/' ? path_end + 1 : path_end;
+	}
+
+	return true;
+}
+
+static bool mgmt_be_xpath_prefix_predicate_compatible(const char *map_path, const char *xpath)
+{
+	char map_stripped[XPATH_MAXLEN];
+	char xpath_stripped[XPATH_MAXLEN];
+
+	if (!mgmt_be_xpath_strip_predicates(map_path, map_stripped, sizeof(map_stripped)) ||
+	    !mgmt_be_xpath_strip_predicates(xpath, xpath_stripped, sizeof(xpath_stripped)))
+		return false;
+
+	if (!mgmt_be_xpath_stripped_prefix(map_stripped, xpath_stripped) &&
+	    !mgmt_be_xpath_stripped_prefix(xpath_stripped, map_stripped))
+		return false;
+
+	return mgmt_be_xpath_predicates_compatible(map_path, xpath);
+}
+
+/*
+ * Check if either map_path or xpath is a prefix of the other along path
+ * boundaries. Existing unpredicated registrations keep the historical matcher.
+ *
+ * Predicated registrations are used when multiple backends own entries under a
+ * shared YANG list, such as OSPFv2 and OSPFv3 under RFC 9129's
+ * ietf-routing control-plane-protocol list. In that case predicates constrain
+ * backend ownership only when the query also specifies the same predicate key.
+ * A conflicting value rejects the backend, but a missing query predicate is a
+ * wildcard: unkeyed list and parent queries still dispatch to every matching
+ * backend so the frontend can merge their entries.
+ */
+static bool mgmt_be_xpath_prefix(const char *map_path, const char *xpath)
+{
+	if (!strchr(map_path, '['))
+		return mgmt_be_xpath_prefix_legacy(map_path, xpath);
+
+	return mgmt_be_xpath_prefix_predicate_compatible(map_path, xpath);
 }
 
 /*
