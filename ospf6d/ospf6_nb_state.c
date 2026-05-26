@@ -66,7 +66,7 @@ static void *ospf6d_ietf_list_next_data(struct list *list, const void *entry)
 
 static const char *ospf6d_ietf_instance_name(const struct ospf6 *ospf6)
 {
-	return ospf6->name ? ospf6->name : "default";
+	return ospf6->name ? ospf6->name : VRF_DEFAULT_NAME;
 }
 
 struct ospf6 *ospf6d_ietf_ospf_lookup_instance(const char *name)
