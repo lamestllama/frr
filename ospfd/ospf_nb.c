@@ -5,13 +5,44 @@
 
 #include <zebra.h>
 
+#include "ospfd/ospfd.h"
 #include "ospf_nb.h"
 
-#define OSPFD_IETF_ROUTING_CP_XPATH                                           \
-	"/ietf-routing:routing/control-plane-protocols/"                      \
-	"control-plane-protocol"
-#define OSPFD_IETF_OSPF_XPATH                                                 \
-	OSPFD_IETF_ROUTING_CP_XPATH "/ietf-ospf:ospf"
+const char *ospfd_ietf_instance_name(unsigned short instance, const char *name,
+				     char *buf, size_t buf_len)
+{
+	if (instance) {
+		snprintf(buf, buf_len, "%u", instance);
+		return buf;
+	}
+
+	return name ? name : VRF_DEFAULT_NAME;
+}
+
+const char *ospfd_ietf_ospf_instance_name(const struct ospf *ospf, char *buf,
+					  size_t buf_len)
+{
+	return ospfd_ietf_instance_name(ospf->instance, ospf_get_name(ospf),
+				       buf, buf_len);
+}
+
+int ospfd_ietf_routing_protocol_instance_xpath(char *xpath, size_t xpath_len,
+					       unsigned short instance,
+					       const char *name)
+{
+	char instance_name[XPATH_MAXLEN];
+
+	return snprintf(xpath, xpath_len, OSPFD_IETF_ROUTING_PROTOCOL_XPATH,
+			ospfd_ietf_instance_name(instance, name, instance_name,
+						 sizeof(instance_name)));
+}
+
+int ospfd_ietf_routing_protocol_xpath(char *xpath, size_t xpath_len,
+				      const struct ospf *ospf)
+{
+	return ospfd_ietf_routing_protocol_instance_xpath(
+		xpath, xpath_len, ospf->instance, ospf_get_name(ospf));
+}
 
 /* clang-format off */
 const struct frr_yang_module_info ospfd_ietf_routing_info = {
@@ -21,11 +52,14 @@ const struct frr_yang_module_info ospfd_ietf_routing_info = {
 		{
 			.xpath = OSPFD_IETF_ROUTING_CP_XPATH,
 			.cbs = {
+				.create = ospfd_ietf_routing_control_plane_protocol_create,
+				.destroy = ospfd_ietf_routing_control_plane_protocol_destroy,
 				.get_next = ospfd_ietf_routing_control_plane_protocol_get_next,
 				.get_keys = ospfd_ietf_routing_control_plane_protocol_get_keys,
 				.lookup_entry =
 					ospfd_ietf_routing_control_plane_protocol_lookup_entry,
 			},
+			.cfg_opt_in = true,
 		},
 		{
 			.xpath = NULL,
