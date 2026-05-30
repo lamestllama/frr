@@ -968,6 +968,12 @@ mtu-ignore, transmit-delay, interface-type, passive, per-interface BFD
 ``required-min-rx-interval``, and per-interface
 ``authentication/ospfv3-key-chain``.
 
+For per-interface BFD, ``bfd/enabled`` controls activation.  The multiplier
+and interval leaves can be configured while BFD is disabled, but they do not
+create or register BFD sessions until ``bfd/enabled=true`` is committed.  The
+legacy parameterised BFD CLI enqueues that enable leaf before it writes the
+parameter leaves.
+
 Examples
 ^^^^^^^^
 

@@ -121,7 +121,6 @@ const struct frr_yang_module_info ospf6d_ietf_ospf_info = {
 			.xpath = OSPF6D_IETF_OSPF_XPATH "/auto-cost/enabled",
 			.cbs = {
 				.modify = ospf6d_ietf_ospf_auto_cost_enabled_modify,
-				.destroy = ospf6d_ietf_ospf_auto_cost_enabled_destroy,
 			},
 			.cfg_opt_in = true,
 		},
@@ -337,7 +336,6 @@ const struct frr_yang_module_info ospf6d_ietf_ospf_info = {
 				 "/areas/area/interfaces/interface/bfd/enabled",
 			.cbs = {
 				.modify = ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_enabled_modify,
-				.destroy = ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_enabled_destroy,
 			},
 			.cfg_opt_in = true,
 		},

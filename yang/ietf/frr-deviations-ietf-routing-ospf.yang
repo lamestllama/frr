@@ -180,4 +180,37 @@ module frr-deviations-ietf-routing-ospf {
     deviate not-supported;
   }
 
+  /*
+   * FRR has no separate OSPF on/off toggle: the protocol runs whenever
+   * an ospfd / ospf6d instance is configured (control-plane-protocol
+   * create) and on every interface that is bound into an area.  Mark
+   * `ospf/enabled` and per-interface `interface/enabled` not-supported
+   * so mgmtd rejects writes at validate time rather than silently
+   * accepting `enabled=false` with no FRR mutation.
+   */
+  deviation "/ietf-routing:routing"
+          + "/ietf-routing:control-plane-protocols"
+          + "/ietf-routing:control-plane-protocol"
+          + "/ospf:ospf/ospf:enabled" {
+    deviate not-supported;
+  }
+
+  deviation "/ietf-routing:routing"
+          + "/ietf-routing:control-plane-protocols"
+          + "/ietf-routing:control-plane-protocol"
+          + "/ospf:ospf/ospf:areas/ospf:area"
+          + "/ospf:interfaces/ospf:interface/ospf:enabled" {
+    deviate not-supported;
+  }
+
+  /*
+   * Note: we cannot mark `ospf/address-family` not-supported because
+   * the RFC 9129 notification instance-header (`notification-instance-
+   * hdr`) carries a leafref to it; disabling the leaf disables the
+   * leafref's target and libyang refuses to load the schema.  FRR
+   * accepts writes to the leaf today even though it ignores them; the
+   * value is implied by the parent control-plane-protocol type so the
+   * footgun is small.
+
+   */
 }
