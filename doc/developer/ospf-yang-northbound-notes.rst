@@ -102,8 +102,10 @@ per-interface area attachment, interface cost, hello-interval, dead-interval,
 retransmit-interval, priority, mtu-ignore, transmit-delay, interface-type,
 passive, OSPFv2 prefix-suppression, per-interface BFD
 (enabled, local-multiplier, desired-min-tx-interval,
-required-min-rx-interval), and OSPFv2 per-interface static
-neighbours (poll-interval, priority). Existing CLI commands for those leaves
+required-min-rx-interval), OSPFv2 per-interface static
+neighbours (poll-interval, priority), and per-interface
+authentication key-chain (OSPFv2 ospfv2-key-chain, OSPFv3
+ospfv3-key-chain). Existing CLI commands for those leaves
 set the same YANG nodes as mgmtd writes.
 
 Configuration Mapping Model
@@ -268,6 +270,32 @@ The current config-write mapping is:
 |                               |                             |                             | it is instance-level and    |
 |                               |                             |                             | cannot synthesise a YANG    |
 |                               |                             |                             | area/interface key.         |
++-------------------------------+-----------------------------+-----------------------------+-----------------------------+
+| ``interface/``                | ``params->keychain_name``   | ``oi->at_data.keychain``    | Only the key-chain case of  |
+| ``authentication/``           | + ``auth_type =             | + ``OSPF6_AUTH_TRAILER_``   | the RFC's authentication    |
+| ``ospfv2-key-chain``          | OSPF_AUTH_CRYPTOGRAPHIC``;  | ``KEYCHAIN`` flag; destroy  | choice is implemented in    |
+| (v2)                          | destroy restores            | clears flag + frees         | this branch.  v3 rejects    |
+| ``interface/``                | NOTSET                      | keychain                    | the modify at               |
+| ``authentication/``           |                             |                             | NB_EV_VALIDATE if a manual  |
+| ``ospfv3-key-chain``          |                             |                             | key is already set (mirrors |
+| (v3)                          |                             |                             | the legacy CLI's lock).     |
+|                               |                             |                             | The RFC type is             |
+|                               |                             |                             | ``key-chain:key-chain-ref`` |
+|                               |                             |                             | (leafref), so the named     |
+|                               |                             |                             | keychain must exist at      |
+|                               |                             |                             | commit time -- this         |
+|                               |                             |                             | diverges from the legacy    |
+|                               |                             |                             | CLI which accepts forward   |
+|                               |                             |                             | references.  Other          |
+|                               |                             |                             | authentication leaves       |
+|                               |                             |                             | (explicit-key, IPsec SA,    |
+|                               |                             |                             | auth-trailer-rfc) are       |
+|                               |                             |                             | deferred -- pyang / libyang |
+|                               |                             |                             | refuse the deviation paths  |
+|                               |                             |                             | inside the nested case      |
+|                               |                             |                             | nodes, so mgmtd silently    |
+|                               |                             |                             | accepts writes against      |
+|                               |                             |                             | them with no callback fire. |
 +-------------------------------+-----------------------------+-----------------------------+-----------------------------+
 | ``ospf/spf-control/paths``    | ``ospf->max_multipath``;    | ``ospf6->max_multipath``;   | RFC types ``paths`` as      |
 |                               | destroy restores            | destroy restores            | uint16 (1..65535) and FRR's |

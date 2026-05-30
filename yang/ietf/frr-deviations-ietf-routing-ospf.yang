@@ -176,4 +176,5 @@ module frr-deviations-ietf-routing-ospf {
           + "/ospf:static-neighbors/ospf:neighbor/ospf:cost" {
     deviate not-supported;
   }
+
 }
