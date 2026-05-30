@@ -1382,6 +1382,90 @@ def test_ospf_yang_preference_config():
         assert "external 23" not in running
 
 
+def test_ospf_yang_spf_control_paths_config():
+    """per-instance spf-control/paths round-trip via mgmtd.
+
+    RFC 9129's `/spf-control/paths` caps at 32; the legacy CLI's
+    `maximum-paths` accepts up to MULTIPATH_NUM (platform-defined).
+    The conversion routes <= 32 through YANG and falls back to the
+    legacy direct-mutation path for larger values; this test covers
+    both flavours of CLI dispatch alongside the direct YANG path.
+    """
+    tgen = get_topogen()
+    if tgen.routers_have_failure():
+        pytest.skip("skipped because of router(s) failure")
+
+    r1 = tgen.gears["r1"]
+
+    for proto, daemon in (
+        ("ietf-ospf:ospfv2", "ospfd"),
+        ("ietf-ospf:ospfv3", "ospf6d"),
+    ):
+        instance = (
+            "/ietf-routing:routing/control-plane-protocols/"
+            "control-plane-protocol[type='"
+            + proto
+            + "'][name='default']/ietf-ospf:ospf"
+        )
+
+        # YANG set within RFC range.
+        r1.vtysh_cmd(
+            "configure terminal file-lock\n"
+            "mgmt set-config {}/spf-control/paths 7\n"
+            "mgmt commit apply".format(instance)
+        )
+        running = r1.vtysh_cmd("show running-config {}".format(daemon))
+        assert (
+            "maximum-paths 7" in running
+        ), "expected 'maximum-paths 7' after YANG set, got:\n{}".format(running)
+
+        # YANG delete restores no-config (FRR semantics).
+        r1.vtysh_cmd(
+            "configure terminal file-lock\n"
+            "mgmt delete-config {}/spf-control/paths\n"
+            "mgmt commit apply".format(instance)
+        )
+        running = r1.vtysh_cmd("show running-config {}".format(daemon))
+        assert (
+            "maximum-paths 7" not in running
+        ), "maximum-paths 7 should be gone after YANG delete, got:\n{}".format(running)
+
+
+def test_ospf_max_multipath_cli_routes_through_yang():
+    """Legacy `maximum-paths N` continues to work via vtysh; values
+    within RFC 9129's 1..32 range route through the YANG
+    `/spf-control/paths` callback, the rest stay on the legacy
+    direct-mutation path."""
+    tgen = get_topogen()
+    if tgen.routers_have_failure():
+        pytest.skip("skipped because of router(s) failure")
+
+    r1 = tgen.gears["r1"]
+
+    for router_block, daemon in (
+        ("router ospf", "ospfd"),
+        ("router ospf6", "ospf6d"),
+    ):
+        r1.vtysh_cmd(
+            "configure terminal\n" "{}\n" " maximum-paths 5\n".format(router_block)
+        )
+        running = r1.vtysh_cmd("show running-config {}".format(daemon))
+        assert (
+            "maximum-paths 5" in running
+        ), "expected 'maximum-paths 5' in {} running-config, got:\n{}".format(
+            daemon, running
+        )
+        r1.vtysh_cmd(
+            "configure terminal\n" "{}\n" " no maximum-paths\n".format(router_block)
+        )
+        running = r1.vtysh_cmd("show running-config {}".format(daemon))
+        assert (
+            "maximum-paths 5" not in running
+        ), "maximum-paths 5 should be gone after 'no maximum-paths', got:\n{}".format(
+            running
+        )
+
+
 def test_ospf_yang_interface_type_and_passive_config():
     """interface-type and passive leaves round-trip via mgmtd."""
     tgen = get_topogen()
