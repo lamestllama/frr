@@ -2085,8 +2085,8 @@ DEFUN (no_ipv6_ospf6_ifmtu,
  * to direct mutation. Returns 0 on success and writes the xpath into
  * buf; returns -1 if YANG is not applicable.
  */
-static int ospf6_per_iface_xpath(char *xpath, size_t size, const struct interface *ifp,
-				 const char *leaf)
+int ospf6_per_iface_xpath(char *xpath, size_t size, const struct interface *ifp,
+			  const char *leaf)
 {
 	const struct ospf6_interface *oi;
 	const struct ospf6 *ospf6;

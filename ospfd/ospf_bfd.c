@@ -30,6 +30,7 @@
 #include "ospf_dump.h"
 #include "ospf_vty.h"
 #include "ospf_quicknbr.h"
+#include "northbound_cli.h"
 
 DEFINE_MTYPE_STATIC(OSPFD, BFD_CONFIG, "BFD configuration data");
 DEFINE_MTYPE_STATIC(OSPFD, OSPF_BFD_SESSION_ENTRY, "OSPF BFD session entry");
@@ -363,7 +364,7 @@ static void ospf_bfd_if_prune_nonquick(struct ospf_interface *oi)
 	}
 }
 
-static void ospf_interface_bfd_apply(struct interface *ifp)
+void ospf_interface_bfd_apply(struct interface *ifp)
 {
 	struct ospf_interface *oi;
 	struct route_table *nbrs;
@@ -386,7 +387,7 @@ static void ospf_interface_bfd_apply(struct interface *ifp)
 	}
 }
 
-static void ospf_interface_enable_bfd(struct interface *ifp, bool quick)
+void ospf_interface_enable_bfd(struct interface *ifp, bool quick)
 {
 	struct ospf_if_params *oip = IF_DEF_PARAMS(ifp);
 	bool old_quick = false;
@@ -488,7 +489,15 @@ void ospf_interface_bfd_show(struct vty *vty, const struct interface *ifp,
 			bfd_config->min_tx);
 }
 
-DEFUN (ip_ospf_bfd,
+/*
+ * `ip ospf bfd` maps onto RFC 9129 `/bfd/enabled`.  The `quick` flag
+ * has no YANG counterpart (FRR-specific quick-establishment mode) so
+ * the shim splits: the bare form routes through YANG when the
+ * interface is in an area; `[quick]` and not-yet-bound interfaces stay
+ * on the legacy direct mutation path so existing behaviour is
+ * preserved.
+ */
+DEFUN_YANG (ip_ospf_bfd,
        ip_ospf_bfd_cmd,
        "ip ospf bfd [quick]",
        "IP Information\n"
@@ -497,11 +506,29 @@ DEFUN (ip_ospf_bfd,
        "Quick neighbor establishment mode\n")
 {
 	VTY_DECLVAR_CONTEXT(interface, ifp);
-	ospf_interface_enable_bfd(ifp, argc >= 4);
+	bool has_quick = (argc >= 4);
+	char xpath[XPATH_MAXLEN];
+
+	if (!has_quick &&
+	    ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/bfd/enabled") == 0) {
+		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, "true");
+		return nb_cli_apply_changes(vty, NULL);
+	}
+
+	ospf_interface_enable_bfd(ifp, has_quick);
 	ospf_interface_bfd_apply(ifp);
 	return CMD_SUCCESS;
 }
 
+/*
+ * The parametrised `ip ospf bfd N N N [quick]` form keeps its legacy
+ * DEFUN shape because the surrounding `#if HAVE_BFDD` switches between
+ * DEFUN_HIDDEN and DEFUN at the macro level; the clippy scanner can't
+ * cope with CPP directives within macro arg lists, so the DEFPY-family
+ * conversion can't apply here.  The body still routes through YANG
+ * when the interface is in an area and `quick` is absent, mirroring
+ * the simpler `ip ospf bfd` form above.
+ */
 #if HAVE_BFDD > 0
 DEFUN_HIDDEN(
 #else
@@ -523,15 +550,37 @@ DEFUN(
 	int idx_number = 3;
 	int idx_number_2 = 4;
 	int idx_number_3 = 5;
+	bool has_quick = (argc >= 7);
+	uint32_t mult = strtol(argv[idx_number]->arg, NULL, 10);
+	uint32_t rx_ms = strtol(argv[idx_number_2]->arg, NULL, 10);
+	uint32_t tx_ms = strtol(argv[idx_number_3]->arg, NULL, 10);
+	char xpath_base[XPATH_MAXLEN];
+	char xpath[XPATH_MAXLEN];
+	char val[32];
 
-	ospf_interface_enable_bfd(ifp, argc >= 7);
+	if (!has_quick &&
+	    ospf_per_iface_xpath(xpath_base, sizeof(xpath_base), ifp, "/bfd") == 0) {
+		snprintf(xpath, sizeof(xpath), "%s/enabled", xpath_base);
+		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, "true");
+		snprintf(xpath, sizeof(xpath), "%s/local-multiplier", xpath_base);
+		snprintf(val, sizeof(val), "%u", mult);
+		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, val);
+		snprintf(xpath, sizeof(xpath), "%s/required-min-rx-interval",
+			 xpath_base);
+		snprintf(val, sizeof(val), "%u", rx_ms * 1000);
+		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, val);
+		snprintf(xpath, sizeof(xpath), "%s/desired-min-tx-interval",
+			 xpath_base);
+		snprintf(val, sizeof(val), "%u", tx_ms * 1000);
+		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, val);
+		return nb_cli_apply_changes(vty, NULL);
+	}
 
+	ospf_interface_enable_bfd(ifp, has_quick);
 	params = IF_DEF_PARAMS(ifp);
-	params->bfd_config->detection_multiplier =
-		strtol(argv[idx_number]->arg, NULL, 10);
-	params->bfd_config->min_rx = strtol(argv[idx_number_2]->arg, NULL, 10);
-	params->bfd_config->min_tx = strtol(argv[idx_number_3]->arg, NULL, 10);
-
+	params->bfd_config->detection_multiplier = mult;
+	params->bfd_config->min_rx = rx_ms;
+	params->bfd_config->min_tx = tx_ms;
 	ospf_interface_bfd_apply(ifp);
 
 	return CMD_SUCCESS;
@@ -586,6 +635,11 @@ DEFUN (no_ip_ospf_bfd_prof,
 	return CMD_SUCCESS;
 }
 
+/*
+ * `no ip ospf bfd` -- same #if-inside-grammar problem as the param
+ * form, so this stays a DEFUN.  The body routes through YANG when the
+ * interface is in an area.
+ */
 DEFUN (no_ip_ospf_bfd,
        no_ip_ospf_bfd_cmd,
 #if HAVE_BFDD > 0
@@ -606,6 +660,13 @@ DEFUN (no_ip_ospf_bfd,
 )
 {
 	VTY_DECLVAR_CONTEXT(interface, ifp);
+	char xpath[XPATH_MAXLEN];
+
+	if (ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/bfd/enabled") == 0) {
+		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
+		return nb_cli_apply_changes(vty, NULL);
+	}
+
 	ospf_interface_disable_bfd(ifp, IF_DEF_PARAMS(ifp));
 	return CMD_SUCCESS;
 }

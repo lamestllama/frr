@@ -1948,6 +1948,175 @@ def test_ospf_yang_prefix_suppression_config():
     )
 
 
+def test_ospf_yang_interface_bfd_config():
+    """per-interface BFD round-trip via mgmtd on both daemons.
+
+    Exercises the four leaves under .../interface/bfd: enabled (the
+    presence-style on/off), local-multiplier, and the tx/rx interval
+    pair.  The RFC unit is microseconds; FRR stores milliseconds and
+    NB_EV_VALIDATE rejects non-multiple-of-1000 values, so the test
+    writes whole-millisecond microsecond values (300000us = 300ms,
+    400000us = 400ms).
+    """
+    tgen = get_topogen()
+    if tgen.routers_have_failure():
+        pytest.skip("skipped because of router(s) failure")
+
+    r1 = tgen.gears["r1"]
+
+    for proto, daemon, expect_line in (
+        ("ietf-ospf:ospfv2", "ospfd", "ip ospf bfd"),
+        ("ietf-ospf:ospfv3", "ospf6d", "ipv6 ospf6 bfd"),
+    ):
+        iface = (
+            _yang_area_xpath(proto, "0.0.0.0")
+            + "/interfaces/interface[name='r1-eth1']"
+        )
+
+        # Enable BFD with non-default timers.
+        r1.vtysh_cmd(
+            "configure terminal file-lock\n"
+            "mgmt set-config {}/bfd/enabled true\n"
+            "mgmt set-config {}/bfd/local-multiplier 5\n"
+            "mgmt set-config {}/bfd/desired-min-tx-interval 400000\n"
+            "mgmt set-config {}/bfd/required-min-rx-interval 400000\n"
+            "mgmt commit apply".format(iface, iface, iface, iface)
+        )
+        running = r1.vtysh_cmd("show running-config {}".format(daemon))
+        assert (
+            expect_line in running
+        ), "expected '{}' on {} after YANG set, got:\n{}".format(
+            expect_line, daemon, running
+        )
+
+        # Disable BFD via the destroy path.
+        r1.vtysh_cmd(
+            "configure terminal file-lock\n"
+            "mgmt delete-config {}/bfd/enabled\n"
+            "mgmt commit apply".format(iface)
+        )
+        running = r1.vtysh_cmd("show running-config {}".format(daemon))
+        assert (
+            expect_line not in running
+        ), "'{}' should be gone on {} after YANG delete, got:\n{}".format(
+            expect_line, daemon, running
+        )
+
+
+def test_ospf_yang_interface_bfd_interval_rejection():
+    """NB_EV_VALIDATE rejects BFD interval values that are not whole
+    milliseconds (multiple of 1000 us) or fall outside FRR's 50..60000
+    ms grammar on both daemons.  The unsupported single-interval BFD
+    form is also rejected by the FRR deviation module.  Uses
+    `_mgmt_commit_attempt` so the rejected candidate is aborted and
+    does not poison subsequent commits.
+    """
+    tgen = get_topogen()
+    if tgen.routers_have_failure():
+        pytest.skip("skipped because of router(s) failure")
+
+    r1 = tgen.gears["r1"]
+
+    for proto in ("ietf-ospf:ospfv2", "ietf-ospf:ospfv3"):
+        iface = (
+            _yang_area_xpath(proto, "0.0.0.0")
+            + "/interfaces/interface[name='r1-eth1']"
+        )
+        # Not a multiple of 1000us.
+        out = _mgmt_commit_attempt(
+            r1,
+            "mgmt set-config {}/bfd/desired-min-tx-interval 300500".format(iface),
+        )
+        assert (
+            "Failed to edit configuration" in out
+            or "Couldn't apply changes" in out
+            or "Configuration failed" in out
+            or "commit failed" in out
+        ), "expected commit rejection on {}, got:\n{}".format(proto, out)
+        # FRR exposes the tx/rx interval form only, not the single
+        # min-interval case from ietf-bfd-types.
+        out = _mgmt_commit_attempt(
+            r1,
+            "mgmt set-config {}/bfd/min-interval 300000".format(iface),
+        )
+        assert (
+            "Failed to edit configuration" in out
+            or "Couldn't apply changes" in out
+            or "Configuration failed" in out
+            or "commit failed" in out
+        ), "expected single-interval rejection on {}, got:\n{}".format(proto, out)
+        # Below 50ms.
+        out = _mgmt_commit_attempt(
+            r1,
+            "mgmt set-config {}/bfd/required-min-rx-interval 1000".format(iface),
+        )
+        assert (
+            "Failed to edit configuration" in out
+            or "Couldn't apply changes" in out
+            or "Configuration failed" in out
+            or "commit failed" in out
+        ), "expected commit rejection on {}, got:\n{}".format(proto, out)
+
+
+def test_ospf_bfd_cli_routes_through_yang():
+    """Legacy BFD CLI on both daemons drives the YANG callback when
+    the interface is in an area.  Exercises both the bare enable form
+    and the N N N parametrised form."""
+    tgen = get_topogen()
+    if tgen.routers_have_failure():
+        pytest.skip("skipped because of router(s) failure")
+
+    r1 = tgen.gears["r1"]
+
+    for cli, daemon, expect in (
+        ("ip ospf bfd", "ospfd", "ip ospf bfd"),
+        ("ipv6 ospf6 bfd", "ospf6d", "ipv6 ospf6 bfd"),
+    ):
+        try:
+            r1.vtysh_cmd(
+                "configure terminal\n"
+                "interface r1-eth1\n"
+                " {}\n".format(cli)
+            )
+            running = r1.vtysh_cmd("show running-config {}".format(daemon))
+            assert (
+                expect in running
+            ), "expected '{}' on {} after CLI set, got:\n{}".format(
+                expect, daemon, running
+            )
+
+            # Parametrised form: detect-mult 5, rx 400, tx 400.
+            r1.vtysh_cmd(
+                "configure terminal\n"
+                "interface r1-eth1\n"
+                " {} 5 400 400\n".format(cli)
+            )
+            running = r1.vtysh_cmd("show running-config {}".format(daemon))
+            assert (
+                expect in running
+            ), "expected '{}' on {} after param CLI set, got:\n{}".format(
+                expect, daemon, running
+            )
+
+            r1.vtysh_cmd(
+                "configure terminal\n"
+                "interface r1-eth1\n"
+                " no {}\n".format(cli)
+            )
+            running = r1.vtysh_cmd("show running-config {}".format(daemon))
+            assert (
+                expect not in running
+            ), "'{}' should be gone on {} after legacy 'no', got:\n{}".format(
+                expect, daemon, running
+            )
+        finally:
+            r1.vtysh_cmd(
+                "configure terminal\n"
+                "interface r1-eth1\n"
+                " no {}\n".format(cli)
+            )
+
+
 def test_ospf_prefix_suppression_cli_routes_through_yang():
     """Legacy `ip ospf prefix-suppression` / `no ip ospf prefix-suppression`
     on r1-eth1 (no per-address override) drives the YANG callback."""

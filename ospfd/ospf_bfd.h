@@ -33,6 +33,22 @@ extern void ospf_interface_bfd_show(struct vty *vty,
 extern void ospf_interface_disable_bfd(struct interface *ifp,
 				       struct ospf_if_params *oip);
 
+/*
+ * Enables interface BFD configuration, allocating `bfd_config` with FRR
+ * defaults on first call.  `quick` controls FRR's quick-establishment
+ * mode (no YANG counterpart -- the RFC 9129 northbound only flips the
+ * `enabled` leaf, so it always passes `false`).  Promoted from static
+ * to extern so the RFC 9129 `/bfd/enabled` callback and the legacy
+ * `ip ospf bfd` CLI share the same allocation path.
+ */
+extern void ospf_interface_enable_bfd(struct interface *ifp, bool quick);
+
+/*
+ * Push BFD configuration changes to live sessions on this interface.
+ * Idempotent.
+ */
+extern void ospf_interface_bfd_apply(struct interface *ifp);
+
 /**
  * Create/update BFD session for this OSPF neighbor.
  */
