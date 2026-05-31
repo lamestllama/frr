@@ -29,6 +29,9 @@ DEFINE_MTYPE_STATIC(LIB, NB_TRANS, "NB transaction");
 /* Running configuration - shouldn't be modified directly. */
 struct nb_config *running_config;
 
+static nb_rpc_dispatch_cb nb_rpc_dispatcher;
+static nb_rpc_dispatch_async_cb nb_rpc_dispatcher_async;
+
 /* Hash table of user pointers associated with configuration entries. */
 static struct hash *running_config_entries;
 
@@ -1956,6 +1959,36 @@ int nb_callback_rpc(const struct nb_node *nb_node, const char *xpath,
 	args.errmsg = errmsg;
 	args.errmsg_len = errmsg_len;
 	return nb_node->cbs.rpc(&args);
+}
+
+void nb_rpc_dispatch_set(nb_rpc_dispatch_cb cb)
+{
+	nb_rpc_dispatcher = cb;
+}
+
+void nb_rpc_dispatch_async_set(nb_rpc_dispatch_async_cb cb)
+{
+	nb_rpc_dispatcher_async = cb;
+}
+
+int nb_rpc_dispatch(const char *xpath, const struct lyd_node *input,
+		    struct lyd_node **output, char *errmsg, size_t errmsg_len)
+{
+	if (!nb_rpc_dispatcher)
+		return -EOPNOTSUPP;
+
+	return nb_rpc_dispatcher(xpath, input, output, errmsg, errmsg_len);
+}
+
+int nb_rpc_dispatch_async(const char *xpath, const struct lyd_node *input,
+			  nb_rpc_dispatch_done_cb done, void *arg, char *errmsg,
+			  size_t errmsg_len)
+{
+	if (!nb_rpc_dispatcher_async)
+		return -EOPNOTSUPP;
+
+	return nb_rpc_dispatcher_async(xpath, input, done, arg, errmsg,
+				       errmsg_len);
 }
 
 void nb_callback_notify(const struct nb_node *nb_node, uint8_t op, const char *xpath,

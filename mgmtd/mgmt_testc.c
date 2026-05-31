@@ -21,6 +21,7 @@
 
 static void async_notification(struct nb_cb_notify_args *args);
 static int rpc_callback(struct nb_cb_rpc_args *args);
+static int zebra_rpc_callback(struct nb_cb_rpc_args *args);
 static int test_config_modify(struct nb_cb_modify_args *args);
 static int test_config_destroy(struct nb_cb_destroy_args *args);
 
@@ -146,6 +147,10 @@ static const struct frr_yang_module_info frr_zebra_info = {
 		{
 			.xpath = "/frr-zebra:zebra",
 			.cbs.notify = async_notification,
+		},
+		{
+			.xpath = "/frr-zebra:get-vrf-info",
+			.cbs.rpc = zebra_rpc_callback,
 		},
 		{
 			.xpath = NULL,
@@ -379,6 +384,23 @@ static int rpc_callback(struct nb_cb_rpc_args *args)
 	return 0;
 }
 
+static int zebra_rpc_callback(struct nb_cb_rpc_args *args)
+{
+	zlog_notice("Received zebra YANG RPC");
+
+	yang_dnode_rpc_output_add(args->output,
+				  "vrf-list[name='default']/name", "default");
+	yang_dnode_rpc_output_add(args->output,
+				  "vrf-list[name='default']/vrf-id", "0");
+	yang_dnode_rpc_output_add(args->output,
+				  "vrf-list[name='default']/table-id", "254");
+
+	event_cancel(&event_timeout);
+	event_add_timer(master, success, NULL, 1, NULL);
+
+	return NB_OK;
+}
+
 int main(int argc, char **argv)
 {
 	int f_listen = 0;
@@ -448,6 +470,7 @@ int main(int argc, char **argv)
 	_client_cbs.noper_xpaths = darr_len(_oper_xpaths);
 
 	darr_push(_rpc_xpaths, "/frr-ripd:clear-rip-route");
+	darr_push(_rpc_xpaths, "/frr-zebra:get-vrf-info");
 	_client_cbs.rpc_xpaths = _rpc_xpaths;
 	_client_cbs.nrpc_xpaths = darr_len(_rpc_xpaths);
 

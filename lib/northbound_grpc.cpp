@@ -963,6 +963,42 @@ bool HandleStreamingListTransactions(
 	}
 }
 
+static grpc::Status status_from_errno(int error, const char *errmsg)
+{
+	grpc::StatusCode code;
+	int errnum;
+
+	if (!error)
+		return grpc::Status::OK;
+
+	errnum = error < 0 ? -error : error;
+
+	switch (errnum) {
+	case EINVAL:
+	case EOPNOTSUPP:
+		code = grpc::StatusCode::INVALID_ARGUMENT;
+		break;
+	case ENOENT:
+		code = grpc::StatusCode::NOT_FOUND;
+		break;
+	case ETIMEDOUT:
+		code = grpc::StatusCode::DEADLINE_EXCEEDED;
+		break;
+	case ENOMEM:
+		code = grpc::StatusCode::RESOURCE_EXHAUSTED;
+		break;
+	case EBUSY:
+	case EINPROGRESS:
+		code = grpc::StatusCode::UNAVAILABLE;
+		break;
+	default:
+		code = grpc::StatusCode::INTERNAL;
+		break;
+	}
+
+	return grpc::Status(code, errmsg && errmsg[0] ? errmsg : safe_strerror(errnum));
+}
+
 grpc::Status HandleUnaryGetTransaction(
 	UnaryRpcState<frr::GetTransactionRequest, frr::GetTransactionResponse>
 		*tag)
@@ -1005,95 +1041,229 @@ grpc::Status HandleUnaryGetTransaction(
 	return grpc::Status::OK;
 }
 
-grpc::Status HandleUnaryExecute(
-	UnaryRpcState<frr::ExecuteRequest, frr::ExecuteResponse> *tag)
+static void execute_add_output(frr::ExecuteResponse *response,
+			       struct lyd_node *output_tree)
 {
-	grpc_debug("%s: entered", __func__);
-
-	struct nb_node *nb_node;
-	struct lyd_node *input_tree, *output_tree, *child;
-	const char *xpath;
-	char errmsg[BUFSIZ] = {0};
+	struct lyd_node *child;
 	char path[XPATH_MAXLEN];
+
+	if (!output_tree)
+		return;
+
+	LY_LIST_FOR (lyd_child(output_tree), child) {
+		frr::PathValue *pv = response->add_output();
+		pv->set_path(lyd_path(child, LYD_PATH_STD, path, sizeof(path)));
+		pv->set_value(yang_dnode_get_string(child, NULL));
+	}
+}
+
+static grpc::Status execute_prepare_input(const frr::ExecuteRequest &request,
+					  struct nb_node **nb_node,
+					  struct lyd_node **input_tree)
+{
+	const char *xpath;
 	LY_ERR err;
 
-	// Request: string path = 1;
-	xpath = tag->request.path().c_str();
+	xpath = request.path().c_str();
 
 	grpc_debug("%s(path: \"%s\")", __func__, xpath);
 
-	if (tag->request.path().empty())
+	if (request.path().empty())
 		return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
 				    "Data path is empty");
 
-	nb_node = nb_node_find(xpath);
-	if (!nb_node)
+	*nb_node = nb_node_find(xpath);
+	if (!*nb_node)
 		return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
 				    "Unknown data path");
 
 	// Create input data tree.
 	err = yang_new_path2(NULL, ly_native_ctx, xpath, NULL, 0, (LYD_ANYDATA_VALUETYPE)0, 0,
-			     NULL, &input_tree);
+			     NULL, input_tree);
 	if (err != LY_SUCCESS) {
 		return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
 				    "Invalid data path");
 	}
 
 	// Read input parameters.
-	auto input = tag->request.input();
+	auto input = request.input();
 	for (const frr::PathValue &pv : input) {
 		// Request: repeated PathValue input = 2;
-		err = lyd_new_path(input_tree, ly_native_ctx, pv.path().c_str(),
+		err = lyd_new_path(*input_tree, ly_native_ctx, pv.path().c_str(),
 				   pv.value().c_str(), 0, NULL);
 		if (err != LY_SUCCESS) {
-			lyd_free_tree(input_tree);
+			lyd_free_tree(*input_tree);
+			*input_tree = NULL;
 			return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
 					    "Invalid input data");
 		}
 	}
 
 	// Validate input data.
-	err = lyd_validate_op(input_tree, NULL, LYD_TYPE_RPC_YANG, NULL);
+	err = lyd_validate_op(*input_tree, running_config ? running_config->dnode : NULL,
+			      LYD_TYPE_RPC_YANG, NULL);
 	if (err != LY_SUCCESS) {
-		lyd_free_tree(input_tree);
+		lyd_free_tree(*input_tree);
+		*input_tree = NULL;
 		return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
 				    "Invalid input data");
 	}
 
+	return grpc::Status::OK;
+}
+
+static grpc::Status execute_local_rpc(const frr::ExecuteRequest &request,
+				      struct nb_node *nb_node,
+				      struct lyd_node *input_tree,
+				      frr::ExecuteResponse *response)
+{
+	struct lyd_node *output_tree;
+	const char *xpath = request.path().c_str();
+	char errmsg[BUFSIZ] = {0};
+	LY_ERR err;
+
+	if (!nb_node->cbs.rpc)
+		return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+				    "No RPC callback for data path");
+
 	// Create output data tree.
 	err = yang_new_path2(NULL, ly_native_ctx, xpath, NULL, 0, (LYD_ANYDATA_VALUETYPE)0, 0,
 			     NULL, &output_tree);
-	if (err != LY_SUCCESS) {
-		lyd_free_tree(input_tree);
+	if (err != LY_SUCCESS)
 		return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
 				    "Invalid data path");
-	}
 
 	// Execute callback registered for this XPath.
 	if (nb_callback_rpc(nb_node, xpath, input_tree, output_tree, errmsg,
 			    sizeof(errmsg)) != NB_OK) {
 		flog_warn(EC_LIB_NB_CB_RPC, "%s: rpc callback failed: %s",
 			  __func__, xpath);
-		lyd_free_tree(input_tree);
 		lyd_free_tree(output_tree);
-
 		return grpc::Status(grpc::StatusCode::INTERNAL, "RPC failed");
 	}
 
-	// Process output parameters.
-	LY_LIST_FOR (lyd_child(output_tree), child) {
-		// Response: repeated PathValue output = 1;
-		frr::PathValue *pv = tag->response.add_output();
-		pv->set_path(lyd_path(child, LYD_PATH_STD, path, sizeof(path)));
-		pv->set_value(yang_dnode_get_string(child, NULL));
-	}
-
-	// Release memory.
-	lyd_free_tree(input_tree);
+	execute_add_output(response, output_tree);
 	lyd_free_tree(output_tree);
-
 	return grpc::Status::OK;
 }
+
+grpc::Status HandleUnaryExecute(
+	UnaryRpcState<frr::ExecuteRequest, frr::ExecuteResponse> *tag)
+{
+	struct nb_node *nb_node;
+	struct lyd_node *input_tree = NULL;
+	struct lyd_node *output_tree = NULL;
+	char errmsg[BUFSIZ] = {0};
+	int dispatch_ret;
+	grpc::Status status;
+
+	grpc_debug("%s: entered", __func__);
+
+	status = execute_prepare_input(tag->request, &nb_node, &input_tree);
+	if (!status.ok())
+		return status;
+
+	dispatch_ret = nb_rpc_dispatch(tag->request.path().c_str(), input_tree,
+				       &output_tree, errmsg, sizeof(errmsg));
+	if (dispatch_ret != -EOPNOTSUPP) {
+		if (dispatch_ret)
+			status = status_from_errno(dispatch_ret, errmsg);
+		else
+			execute_add_output(&tag->response, output_tree);
+
+		lyd_free_tree(input_tree);
+		lyd_free_all(output_tree);
+		return status;
+	}
+
+	status = execute_local_rpc(tag->request, nb_node, input_tree,
+				   &tag->response);
+	lyd_free_tree(input_tree);
+	return status;
+}
+
+class ExecuteRpcState : public RpcStateBase
+{
+      public:
+	ExecuteRpcState() : RpcStateBase("Execute"), responder(&ctx){};
+
+	void do_request(::frr::Northbound::AsyncService *service,
+			::grpc::ServerCompletionQueue *cq,
+			bool no_copy) override
+	{
+		grpc_debug("%s, posting a request for: %s", __func__, name);
+		auto copy = no_copy ? this : new ExecuteRpcState();
+
+		copy->service = service;
+		copy->cq = cq;
+		service->RequestExecute(&copy->ctx, &copy->request,
+					&copy->responder, cq, cq, copy);
+	}
+
+	CallState run_mainthread(struct event *event) override
+	{
+		struct nb_node *nb_node;
+		struct lyd_node *input_tree = NULL;
+		char errmsg[BUFSIZ] = {0};
+		grpc::Status status;
+		int ret;
+
+		grpc_debug("%s: entered", __func__);
+
+		status = execute_prepare_input(request, &nb_node, &input_tree);
+		if (!status.ok()) {
+			responder.Finish(response, status, this);
+			return FINISH;
+		}
+
+		ret = nb_rpc_dispatch_async(request.path().c_str(), input_tree,
+					    async_done, this, errmsg,
+					    sizeof(errmsg));
+		if (!ret) {
+			lyd_free_tree(input_tree);
+			return MORE;
+		}
+
+		if (ret != -EOPNOTSUPP)
+			status = status_from_errno(ret, errmsg);
+		else
+			status = execute_local_rpc(request, nb_node, input_tree,
+						   &response);
+
+		lyd_free_tree(input_tree);
+		responder.Finish(response, status, this);
+		return FINISH;
+	}
+
+	void finish_async(grpc::Status status)
+	{
+		do_request(service, cq, false);
+		pthread_mutex_lock(&cmux);
+		state = FINISH;
+		pthread_mutex_unlock(&cmux);
+		responder.Finish(response, status, this);
+	}
+
+	frr::ExecuteRequest request;
+	frr::ExecuteResponse response;
+	grpc::ServerAsyncResponseWriter<frr::ExecuteResponse> responder;
+
+      private:
+	static void async_done(int error, const char *errmsg,
+			       struct lyd_node *output, void *arg)
+	{
+		auto tag = static_cast<ExecuteRpcState *>(arg);
+		grpc::Status status = status_from_errno(error, errmsg);
+
+		if (status.ok())
+			execute_add_output(&tag->response, output);
+		lyd_free_all(output);
+		tag->finish_async(status);
+	}
+
+	::frr::Northbound::AsyncService *service = NULL;
+	::grpc::ServerCompletionQueue *cq = NULL;
+};
 
 // ------------------------------------------------------
 //        Thread Initialization and Run Functions
@@ -1166,7 +1336,10 @@ static void *grpc_pthread_start(void *arg)
 	REQUEST_NEWRPC(GetTransaction, NULL);
 	REQUEST_NEWRPC(LockConfig, NULL);
 	REQUEST_NEWRPC(UnlockConfig, NULL);
-	REQUEST_NEWRPC(Execute, NULL);
+	{
+		auto _rpcState = new ExecuteRpcState();
+		_rpcState->do_request(&service, cq.get(), true);
+	}
 
 	/* Schedule streaming RPC handlers */
 	REQUEST_NEWRPC_STREAMING(Get);

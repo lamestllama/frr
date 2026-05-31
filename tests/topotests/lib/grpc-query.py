@@ -85,6 +85,15 @@ class GRPCClient:
             result += str(r.data.data)
         return result
 
+    def execute(self, xpath, input_values):
+        request = frr_northbound_pb2.ExecuteRequest()
+        request.path = xpath
+        for path, value in input_values:
+            pv = request.input.add()
+            pv.path = path
+            pv.value = value
+        return self.stub.Execute(request)
+
 
 def next_action(action_list=None):
     "Get next action from list or STDIN"
@@ -130,6 +139,7 @@ def main(*args):
     c = GRPCClient(args.server, args.port)
 
     for action in next_action(args.actions):
+        raw_action = action
         action = action.casefold()
         logging.debug("GOT ACTION: %s", action)
         if action == "getcap":
@@ -152,6 +162,16 @@ def main(*args):
             logging.debug("Get State XPath: %s", xpath)
             print(c.get(xpath, encoding, gtype=frr_northbound_pb2.GetRequest.STATE))
             # for _ in range(0, 1):
+        elif action.startswith("exec,"):
+            # Execute an RPC. Input arguments are path=value pairs.
+            parts = raw_action.split(",")
+            xpath = parts[1]
+            input_values = []
+            for item in parts[2:]:
+                path, value = item.split("=", 1)
+                input_values.append((path, value))
+            response = c.execute(xpath, input_values)
+            print(response)
 
 
 if __name__ == "__main__":
