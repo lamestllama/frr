@@ -331,6 +331,84 @@ static int ospfd_ietf_if_state_change(struct ospf_interface *oi, int state, int 
 	return 0;
 }
 
+/*
+ * XPath: /ietf-ospf:if-rx-bad-packet
+ *
+ * Emit when an OSPFv2 packet cannot be parsed on a given interface.
+ * Caller supplies the source address (in network byte order) and the
+ * OSPF packet type (1..5 matching the RFC packet-type enum); the type
+ * is left as 1 (hello) when the packet didn't parse far enough to
+ * extract it.
+ */
+void ospfd_ietf_notif_if_rx_bad_packet(struct ospf_interface *oi, struct in_addr src,
+				       uint8_t packet_type)
+{
+	const char *xpath = "/ietf-ospf:if-rx-bad-packet";
+	struct list *args;
+	char xpath_arg[XPATH_MAXLEN];
+	char buf[INET_ADDRSTRLEN];
+
+	if (!oi || !oi->ifp || !oi->ospf)
+		return;
+
+	args = yang_data_list_new();
+	ospfd_ietf_notif_add_instance_hdr(args, xpath, oi->ospf);
+	ospfd_ietf_notif_add_interface_hdr(args, xpath, oi->ifp);
+
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/packet-source", xpath);
+	inet_ntop(AF_INET, &src, buf, sizeof(buf));
+	listnode_add(args, yang_data_new_string(xpath_arg, buf));
+
+	if (packet_type >= 1 && packet_type <= 5) {
+		snprintf(xpath_arg, sizeof(xpath_arg), "%s/packet-type", xpath);
+		listnode_add(args, yang_data_new_enum(xpath_arg, packet_type));
+	}
+
+	_dbg("bad packet on %s from %s type %u", oi->ifp->name, buf, packet_type);
+	nb_notification_send(xpath, args);
+}
+
+/*
+ * XPath: /ietf-ospf:if-config-error
+ *
+ * Emit when an OSPFv2 packet's contents diverge from the local interface
+ * configuration (mismatched hello/dead interval, area mismatch, version,
+ * MTU, auth, etc).  `error_name` is the RFC enum identifier string;
+ * we pass it as a yang_data_new_string so libyang validates and accepts
+ * it without depending on the enum's numeric value (the RFC leaves
+ * if-config-error's numeric values implicit).
+ */
+void ospfd_ietf_notif_if_config_error(struct ospf_interface *oi, struct in_addr src,
+				      uint8_t packet_type, const char *error_name)
+{
+	const char *xpath = "/ietf-ospf:if-config-error";
+	struct list *args;
+	char xpath_arg[XPATH_MAXLEN];
+	char buf[INET_ADDRSTRLEN];
+
+	if (!oi || !oi->ifp || !oi->ospf || !error_name)
+		return;
+
+	args = yang_data_list_new();
+	ospfd_ietf_notif_add_instance_hdr(args, xpath, oi->ospf);
+	ospfd_ietf_notif_add_interface_hdr(args, xpath, oi->ifp);
+
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/packet-source", xpath);
+	inet_ntop(AF_INET, &src, buf, sizeof(buf));
+	listnode_add(args, yang_data_new_string(xpath_arg, buf));
+
+	if (packet_type >= 1 && packet_type <= 5) {
+		snprintf(xpath_arg, sizeof(xpath_arg), "%s/packet-type", xpath);
+		listnode_add(args, yang_data_new_enum(xpath_arg, packet_type));
+	}
+
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/error", xpath);
+	listnode_add(args, yang_data_new_string(xpath_arg, error_name));
+
+	_dbg("config error on %s from %s type %u: %s", oi->ifp->name, buf, packet_type, error_name);
+	nb_notification_send(xpath, args);
+}
+
 void ospfd_ietf_notif_init(void)
 {
 	hook_register(ospf_nsm_change, ospfd_ietf_nbr_state_change);
