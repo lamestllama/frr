@@ -23,6 +23,8 @@
 
 #include "ospfd/ospfd.h"
 #include "ospfd/ospf_dump.h"
+#include "ospfd/ospf_opaque.h"
+#include "ospfd/ospf_gr.h"
 #include "ospfd/ospf_interface.h"
 #include "ospfd/ospf_ism.h"
 #include "ospfd/ospf_lsa.h"
@@ -36,13 +38,20 @@
 /*
  * Translate FRR's internal NSM state code into the integer value RFC 9129's
  * `nbr-state-type` enum assigns to the same name.  yang_data_new_enum() takes
- * the YANG-defined numeric value and looks up the corresponding name; the two
- * code points happen to differ on OSPFv2 because FRR reserves 0 / 1 for the
- * DependUpon / Deleted control codes.
+ * the YANG-defined numeric value and looks up the corresponding name.
+ *
+ * FRR reserves 0 / 1 for the DependUpon / Deleted lifecycle codes that have
+ * no protocol existence in RFC 2328; both fold into the RFC's `down` state,
+ * which the protocol defines as "no recent information received from the
+ * neighbor".  Without this fold every adjacency tear-down (KillNbr, dead
+ * timer, explicit clear) lands on NSM_Deleted and the hook silently drops
+ * the notification, so subscribers never see neighbours go away.
  */
 static int ospfd_ietf_nbr_state_yang(int nsm_state)
 {
 	switch (nsm_state) {
+	case NSM_DependUpon:
+	case NSM_Deleted:
 	case NSM_Down:
 		return 1; /* down */
 	case NSM_Attempt:
@@ -69,10 +78,15 @@ static int ospfd_ietf_nbr_state_yang(int nsm_state)
  * enum.  Numeric values agree for Down/Loopback/Waiting/PointToPoint but
  * diverge for the DR-election trio: FRR orders DROther=5, Backup=6, DR=7
  * while the RFC orders dr=5, bdr=6, dr-other=7.
+ *
+ * FRR reserves 0 for the DependUpon lifecycle code that has no protocol
+ * existence; it folds into the RFC's `down` so a tear-down through that
+ * state stays observable through if-state-change.
  */
 static int ospfd_ietf_if_state_yang(int ism_state)
 {
 	switch (ism_state) {
+	case ISM_DependUpon:
 	case ISM_Down:
 		return 1; /* down */
 	case ISM_Loopback:
@@ -163,6 +177,121 @@ static int ospfd_ietf_nbr_state_change(struct ospf_neighbor *nbr, int next_state
 
 	nb_notification_send(xpath, args);
 	return 0;
+}
+
+/*
+ * Translate FRR's `ospf_helper_exit_reason` (0..4 enum) into RFC 9129's
+ * `restart-exit-reason-type` (1..5 enum, same names in the same order).
+ *
+ * The default returns -1 so an unfamiliar reason surfaces as an error the
+ * caller can log and suppress.  Folding an unknown reason into `none`
+ * would falsely claim "the helper has not exited" when in fact it just
+ * exited for a reason this build does not yet know about.
+ */
+static int ospfd_ietf_helper_exit_reason_yang(int exit_reason)
+{
+	switch (exit_reason) {
+	case OSPF_GR_HELPER_EXIT_NONE:
+		return 1; /* none */
+	case OSPF_GR_HELPER_INPROGRESS:
+		return 2; /* in-progress */
+	case OSPF_GR_HELPER_COMPLETED:
+		return 3; /* completed */
+	case OSPF_GR_HELPER_GRACE_TIMEOUT:
+		return 4; /* timed-out */
+	case OSPF_GR_HELPER_TOPO_CHG:
+		return 5; /* topology-changed */
+	default:
+		return -1;
+	}
+}
+
+/*
+ * XPath: /ietf-ospf:restart-status-change
+ *
+ * Emit when the local OSPFv2 instance transitions in or out of graceful-
+ * restart mode.  `status` follows RFC 9129's restart-status-type values
+ * (1=not-restarting, 2=planned-restart, 3=unplanned-restart).
+ * `exit_reason` is in FRR's `enum ospf_helper_exit_reason` space; we
+ * translate to the RFC enum.  All FRR-known restart reasons are SW-
+ * initiated and map to planned-restart.
+ */
+void ospfd_ietf_notif_restart_status_change(struct ospf *ospf, int status, int exit_reason)
+{
+	const char *xpath = "/ietf-ospf:restart-status-change";
+	struct list *args;
+	char xpath_arg[XPATH_MAXLEN];
+	int yang_exit;
+
+	if (!ospf)
+		return;
+
+	args = yang_data_list_new();
+	ospfd_ietf_notif_add_instance_hdr(args, xpath, ospf);
+
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/status", xpath);
+	listnode_add(args, yang_data_new_enum(xpath_arg, status));
+
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/restart-interval", xpath);
+	listnode_add(args, yang_data_new_uint16(xpath_arg, ospf->gr_info.grace_period));
+
+	yang_exit = ospfd_ietf_helper_exit_reason_yang(exit_reason);
+	if (yang_exit < 0) {
+		zlog_warn("%s: unrecognised GR exit reason %d, suppressing notification",
+			  __func__, exit_reason);
+		list_delete(&args);
+		return;
+	}
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/exit-reason", xpath);
+	listnode_add(args, yang_data_new_enum(xpath_arg, yang_exit));
+
+	_dbg("instance %s gr status %d exit %d", ospf->name ?: VRF_DEFAULT_NAME, status,
+	     exit_reason);
+	nb_notification_send(xpath, args);
+}
+
+/*
+ * XPath: /ietf-ospf:nbr-restart-helper-status-change
+ *
+ * Emit when this router enters or leaves helper mode for a neighbour's
+ * graceful restart.  `status` is RFC restart-helper-status-type
+ * (1=not-helping, 2=helping).  `age` is the remaining helper time in
+ * seconds.  `exit_reason` is FRR's enum ospf_helper_exit_reason.
+ */
+void ospfd_ietf_notif_nbr_restart_helper_status_change(struct ospf_neighbor *nbr, int status,
+						       uint16_t age, int exit_reason)
+{
+	const char *xpath = "/ietf-ospf:nbr-restart-helper-status-change";
+	struct list *args;
+	char xpath_arg[XPATH_MAXLEN];
+	int yang_exit;
+
+	if (!nbr || !nbr->oi || !nbr->oi->ifp || !nbr->oi->ospf)
+		return;
+
+	args = yang_data_list_new();
+	ospfd_ietf_notif_add_instance_hdr(args, xpath, nbr->oi->ospf);
+	ospfd_ietf_notif_add_interface_hdr(args, xpath, nbr->oi->ifp);
+	ospfd_ietf_notif_add_neighbor_hdr(args, xpath, nbr);
+
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/status", xpath);
+	listnode_add(args, yang_data_new_enum(xpath_arg, status));
+
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/age", xpath);
+	listnode_add(args, yang_data_new_uint16(xpath_arg, age));
+
+	yang_exit = ospfd_ietf_helper_exit_reason_yang(exit_reason);
+	if (yang_exit < 0) {
+		zlog_warn("%s: unrecognised GR helper exit reason %d, suppressing notification",
+			  __func__, exit_reason);
+		list_delete(&args);
+		return;
+	}
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/exit-reason", xpath);
+	listnode_add(args, yang_data_new_enum(xpath_arg, yang_exit));
+
+	_dbg("nbr %pI4 helper status %d exit %d", &nbr->router_id, status, exit_reason);
+	nb_notification_send(xpath, args);
 }
 
 /*
