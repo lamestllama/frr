@@ -179,5 +179,7 @@ void ospfd_ietf_notif_if_rx_bad_packet(struct ospf_interface *oi, struct in_addr
 				       uint8_t packet_type);
 void ospfd_ietf_notif_if_config_error(struct ospf_interface *oi, struct in_addr src,
 				      uint8_t packet_type, const char *error_name);
+void ospfd_ietf_notif_nssa_translator_state_change(struct ospf *ospf, struct in_addr area_id,
+						   int translator_state);
 
 #endif /* FRR_OSPF_NB_H */

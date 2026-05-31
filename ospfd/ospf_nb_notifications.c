@@ -22,7 +22,6 @@
 #include "yang_wrappers.h"
 
 #include "ospfd/ospfd.h"
-#include "ospfd/ospf_dump.h"
 #include "ospfd/ospf_opaque.h"
 #include "ospfd/ospf_gr.h"
 #include "ospfd/ospf_interface.h"
@@ -47,30 +46,29 @@
  * timer, explicit clear) lands on NSM_Deleted and the hook silently drops
  * the notification, so subscribers never see neighbours go away.
  */
+static const int ospfd_ietf_nbr_state_table[OSPF_NSM_STATE_MAX] = {
+	[NSM_DependUpon] = 1, /* down */
+	[NSM_Deleted] = 1,    /* down */
+	[NSM_Down] = 1,       /* down */
+	[NSM_Attempt] = 2,    /* attempt */
+	[NSM_Init] = 3,       /* init */
+	[NSM_TwoWay] = 4,     /* 2-way */
+	[NSM_ExStart] = 5,    /* exstart */
+	[NSM_Exchange] = 6,   /* exchange */
+	[NSM_Loading] = 7,    /* loading */
+	[NSM_Full] = 8,       /* full */
+};
+
 static int ospfd_ietf_nbr_state_yang(int nsm_state)
 {
-	switch (nsm_state) {
-	case NSM_DependUpon:
-	case NSM_Deleted:
-	case NSM_Down:
-		return 1; /* down */
-	case NSM_Attempt:
-		return 2; /* attempt */
-	case NSM_Init:
-		return 3; /* init */
-	case NSM_TwoWay:
-		return 4; /* 2-way */
-	case NSM_ExStart:
-		return 5; /* exstart */
-	case NSM_Exchange:
-		return 6; /* exchange */
-	case NSM_Loading:
-		return 7; /* loading */
-	case NSM_Full:
-		return 8; /* full */
-	default:
+	int val;
+
+	if (nsm_state < 0 ||
+	    (size_t)nsm_state >= array_size(ospfd_ietf_nbr_state_table))
 		return -1;
-	}
+
+	val = ospfd_ietf_nbr_state_table[nsm_state];
+	return val ? val : -1;
 }
 
 /*
@@ -83,27 +81,27 @@ static int ospfd_ietf_nbr_state_yang(int nsm_state)
  * existence; it folds into the RFC's `down` so a tear-down through that
  * state stays observable through if-state-change.
  */
+static const int ospfd_ietf_if_state_table[OSPF_ISM_STATE_MAX] = {
+	[ISM_DependUpon] = 1,   /* down */
+	[ISM_Down] = 1,         /* down */
+	[ISM_Loopback] = 2,     /* loopback */
+	[ISM_Waiting] = 3,      /* waiting */
+	[ISM_PointToPoint] = 4, /* point-to-point */
+	[ISM_DR] = 5,           /* dr */
+	[ISM_Backup] = 6,       /* bdr */
+	[ISM_DROther] = 7,      /* dr-other */
+};
+
 static int ospfd_ietf_if_state_yang(int ism_state)
 {
-	switch (ism_state) {
-	case ISM_DependUpon:
-	case ISM_Down:
-		return 1; /* down */
-	case ISM_Loopback:
-		return 2; /* loopback */
-	case ISM_Waiting:
-		return 3; /* waiting */
-	case ISM_PointToPoint:
-		return 4; /* point-to-point */
-	case ISM_DR:
-		return 5; /* dr */
-	case ISM_Backup:
-		return 6; /* bdr */
-	case ISM_DROther:
-		return 7; /* dr-other */
-	default:
+	int val;
+
+	if (ism_state < 0 ||
+	    (size_t)ism_state >= array_size(ospfd_ietf_if_state_table))
 		return -1;
-	}
+
+	val = ospfd_ietf_if_state_table[ism_state];
+	return val ? val : -1;
 }
 
 static void ospfd_ietf_notif_add_instance_hdr(struct list *args, const char *xpath,
@@ -181,29 +179,34 @@ static int ospfd_ietf_nbr_state_change(struct ospf_neighbor *nbr, int next_state
 
 /*
  * Translate FRR's `ospf_helper_exit_reason` (0..4 enum) into RFC 9129's
- * `restart-exit-reason-type` (1..5 enum, same names in the same order).
+ * `restart-exit-reason-type` (1..5 enum).  FRR's enum order differs from
+ * the RFC value order: TOPO_CHG=2 maps to topology-changed=5, while
+ * COMPLETED=4 maps to completed=3.  A simple offset does not work.
  *
  * The default returns -1 so an unfamiliar reason surfaces as an error the
  * caller can log and suppress.  Folding an unknown reason into `none`
  * would falsely claim "the helper has not exited" when in fact it just
  * exited for a reason this build does not yet know about.
  */
+static const int
+	ospfd_ietf_helper_exit_reason_table[OSPF_GR_HELPER_COMPLETED + 1] = {
+		[OSPF_GR_HELPER_EXIT_NONE] = 1,     /* none */
+		[OSPF_GR_HELPER_INPROGRESS] = 2,    /* in-progress */
+		[OSPF_GR_HELPER_COMPLETED] = 3,     /* completed */
+		[OSPF_GR_HELPER_GRACE_TIMEOUT] = 4, /* timed-out */
+		[OSPF_GR_HELPER_TOPO_CHG] = 5,      /* topology-changed */
+	};
+
 static int ospfd_ietf_helper_exit_reason_yang(int exit_reason)
 {
-	switch (exit_reason) {
-	case OSPF_GR_HELPER_EXIT_NONE:
-		return 1; /* none */
-	case OSPF_GR_HELPER_INPROGRESS:
-		return 2; /* in-progress */
-	case OSPF_GR_HELPER_COMPLETED:
-		return 3; /* completed */
-	case OSPF_GR_HELPER_GRACE_TIMEOUT:
-		return 4; /* timed-out */
-	case OSPF_GR_HELPER_TOPO_CHG:
-		return 5; /* topology-changed */
-	default:
+	int val;
+
+	if (exit_reason < 0 ||
+	    (size_t)exit_reason >= array_size(ospfd_ietf_helper_exit_reason_table))
 		return -1;
-	}
+
+	val = ospfd_ietf_helper_exit_reason_table[exit_reason];
+	return val ? val : -1;
 }
 
 /*
@@ -406,6 +409,44 @@ void ospfd_ietf_notif_if_config_error(struct ospf_interface *oi, struct in_addr 
 	listnode_add(args, yang_data_new_string(xpath_arg, error_name));
 
 	_dbg("config error on %s from %s type %u: %s", oi->ifp->name, buf, packet_type, error_name);
+	nb_notification_send(xpath, args);
+}
+
+/*
+ * XPath: /ietf-ospf:nssa-translator-status-change
+ *
+ * Emit when an OSPFv2 area's NSSA translator state transitions.  RFC 9129
+ * defines three states (enabled=1, elected=2, disabled=3); FRR only
+ * tracks DISABLED (this router isn't translating) and ENABLED (this
+ * router is the elected translator), so we map DISABLED -> `disabled`
+ * and ENABLED -> `elected`.  OSPFv3 has no NSSA translator surface in
+ * FRR, so this notification is OSPFv2-only.
+ */
+void ospfd_ietf_notif_nssa_translator_state_change(struct ospf *ospf, struct in_addr area_id,
+						   int translator_state)
+{
+	const char *xpath = "/ietf-ospf:nssa-translator-status-change";
+	struct list *args;
+	char xpath_arg[XPATH_MAXLEN];
+	char buf[INET_ADDRSTRLEN];
+	int yang_state;
+
+	if (!ospf)
+		return;
+
+	yang_state = (translator_state == OSPF_NSSA_TRANSLATE_DISABLED) ? 3 : 2;
+
+	args = yang_data_list_new();
+	ospfd_ietf_notif_add_instance_hdr(args, xpath, ospf);
+
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/area-id", xpath);
+	inet_ntop(AF_INET, &area_id, buf, sizeof(buf));
+	listnode_add(args, yang_data_new_string(xpath_arg, buf));
+
+	snprintf(xpath_arg, sizeof(xpath_arg), "%s/status", xpath);
+	listnode_add(args, yang_data_new_enum(xpath_arg, yang_state));
+
+	_dbg("area %pI4 nssa-translator status %d", &area_id, translator_state);
 	nb_notification_send(xpath, args);
 }
 

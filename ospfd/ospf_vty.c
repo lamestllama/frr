@@ -285,18 +285,15 @@ static int ospf_router_id_xpath(char *xpath, size_t size, const struct ospf *osp
  * instance keys come from FRR-side context rather than a vty xpath push.
  * Returns -1 on truncation.
  */
-int ospf_per_instance_xpath(char *xpath, size_t size,
-			    const struct ospf *ospf, const char *leaf)
+int ospf_per_instance_xpath(char *xpath, size_t size, const struct ospf *ospf, const char *leaf)
 {
 	char instance_name[XPATH_MAXLEN];
 	int ret;
 
 	if (!ospf || !leaf)
 		return -1;
-	ret = snprintf(xpath, size,
-		       OSPFD_IETF_ROUTING_PROTOCOL_XPATH "/ietf-ospf:ospf%s",
-		       ospfd_ietf_ospf_instance_name(ospf, instance_name,
-						     sizeof(instance_name)),
+	ret = snprintf(xpath, size, OSPFD_IETF_ROUTING_PROTOCOL_XPATH "/ietf-ospf:ospf%s",
+		       ospfd_ietf_ospf_instance_name(ospf, instance_name, sizeof(instance_name)),
 		       leaf);
 	if (ret < 0 || (size_t)ret >= size)
 		return -1;
@@ -355,8 +352,7 @@ static int ospf_area_xpath(char *xpath, size_t size, const struct ospf *ospf,
  * `ip ospf cost N A.B.C.D`) are out of RFC 9129's scope and never go
  * through YANG; the caller checks ifaddr_str before calling this.
  */
-int ospf_per_iface_xpath(char *xpath, size_t size, const struct interface *ifp,
-			 const char *leaf)
+int ospf_per_iface_xpath(char *xpath, size_t size, const struct interface *ifp, const char *leaf)
 {
 	const struct ospf *ospf = NULL;
 	const struct ospf_if_info *oii;
@@ -781,8 +777,7 @@ DEFPY_YANG (ospf_area_range,
 	nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, "true");
 
 	if (cost_str) {
-		snprintf(tail, sizeof(tail), "/ranges/range[prefix='%s']/cost",
-			 prefix_str);
+		snprintf(tail, sizeof(tail), "/ranges/range[prefix='%s']/cost", prefix_str);
 		if (ospf_area_xpath(xpath, sizeof(xpath), ospf_inst, area_id, tail) != 0)
 			return CMD_WARNING_CONFIG_FAILED;
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, cost_str);
@@ -2800,13 +2795,11 @@ DEFPY_YANG (ospf_max_multipath,
 	char xpath[XPATH_MAXLEN];
 
 	if (maxpaths > MULTIPATH_NUM) {
-		vty_out(vty, "%% maximum-paths exceeds platform max %u\n",
-			MULTIPATH_NUM);
+		vty_out(vty, "%% maximum-paths exceeds platform max %u\n", MULTIPATH_NUM);
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
-	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-				    "/spf-control/paths") == 0) {
+	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/spf-control/paths") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, maxpaths_str);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -2825,8 +2818,7 @@ DEFPY_YANG (no_ospf_max_multipath,
 	VTY_DECLVAR_INSTANCE_CONTEXT(ospf, ospf);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-				    "/spf-control/paths") == 0) {
+	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/spf-control/paths") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -8579,10 +8571,9 @@ static int ospf_hello_set_apply(struct vty *vty, struct interface *ifp, uint32_t
 
 	if (!ifaddr_str && ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/hello-interval") == 0) {
 		params = IF_DEF_PARAMS(ifp);
-		if (params->v_wait <= seconds &&
-		    seconds < UINT16_MAX &&
-		    ospf_per_iface_xpath(dead_xpath, sizeof(dead_xpath), ifp,
-					 "/dead-interval") == 0) {
+		if (params->v_wait <= seconds && seconds < UINT16_MAX &&
+		    ospf_per_iface_xpath(dead_xpath, sizeof(dead_xpath), ifp, "/dead-interval") ==
+			    0) {
 			/*
 			 * The legacy CLI allowed operators to raise hello first
 			 * and fix dead-interval with the next command.  YANG
@@ -8757,8 +8748,7 @@ static void ospf_network_legacy_reset_frr_modifiers(struct interface *ifp)
 	struct ospf_interface *oi;
 
 	IF_DEF_PARAMS(ifp)->ptp_dmvpn = 0;
-	IF_DEF_PARAMS(ifp)->p2mp_delay_reflood =
-		OSPF_P2MP_DELAY_REFLOOD_DEFAULT;
+	IF_DEF_PARAMS(ifp)->p2mp_delay_reflood = OSPF_P2MP_DELAY_REFLOOD_DEFAULT;
 	IF_DEF_PARAMS(ifp)->p2mp_non_broadcast = OSPF_P2MP_NON_BROADCAST_DEFAULT;
 
 	for (rn = route_top(IF_OIFS(ifp)); rn; rn = route_next(rn)) {
@@ -8771,11 +8761,9 @@ static void ospf_network_legacy_reset_frr_modifiers(struct interface *ifp)
 	}
 }
 
-static int ospf_network_legacy_apply(struct vty *vty, struct interface *ifp,
-				     const char *bcast, const char *nbma,
-				     const char *p2mp, const char *delay_reflood,
-				     const char *p2mp_nbma, const char *p2p,
-				     const char *dmvpn)
+static int ospf_network_legacy_apply(struct vty *vty, struct interface *ifp, const char *bcast,
+				     const char *nbma, const char *p2mp, const char *delay_reflood,
+				     const char *p2mp_nbma, const char *p2p, const char *dmvpn)
 {
 	int old_type = IF_DEF_PARAMS(ifp)->type;
 	uint8_t old_ptp_dmvpn = IF_DEF_PARAMS(ifp)->ptp_dmvpn;
@@ -8889,8 +8877,8 @@ DEFPY_YANG(ip_ospf_network, ip_ospf_network_cmd,
 		return nb_cli_apply_changes(vty, NULL);
 	}
 
-	return ospf_network_legacy_apply(vty, ifp, bcast, nbma, p2mp,
-					 delay_reflood, p2mp_nbma, p2p, dmvpn);
+	return ospf_network_legacy_apply(vty, ifp, bcast, nbma, p2mp, delay_reflood, p2mp_nbma,
+					 p2p, dmvpn);
 }
 
 DEFPY_YANG_HIDDEN (ospf_network,
@@ -8916,15 +8904,13 @@ DEFPY_YANG_HIDDEN (ospf_network,
 	else if (p2p)
 		type_str = "point-to-point";
 
-	if (type_str &&
-	    ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/interface-type") == 0) {
+	if (type_str && ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/interface-type") == 0) {
 		ospf_network_legacy_reset_frr_modifiers(ifp);
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, type_str);
 		return nb_cli_apply_changes(vty, NULL);
 	}
 
-	return ospf_network_legacy_apply(vty, ifp, bcast, nbma, p2mp, NULL, NULL,
-					 p2p, NULL);
+	return ospf_network_legacy_apply(vty, ifp, bcast, nbma, p2mp, NULL, NULL, p2p, NULL);
 }
 
 static int ospf_network_legacy_unset(struct vty *vty, struct interface *ifp)
@@ -9172,8 +9158,8 @@ static int ospf_retransmit_interval_set_apply(struct vty *vty, struct interface 
 	char xpath[XPATH_MAXLEN];
 	char buf[16];
 
-	if (!ifaddr_str && ospf_per_iface_xpath(xpath, sizeof(xpath), ifp,
-						"/retransmit-interval") == 0) {
+	if (!ifaddr_str &&
+	    ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/retransmit-interval") == 0) {
 		snprintf(buf, sizeof(buf), "%u", seconds);
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, buf);
 		return nb_cli_apply_changes(vty, NULL);
@@ -9202,8 +9188,8 @@ static int ospf_retransmit_interval_unset_apply(struct vty *vty, struct interfac
 	struct in_addr addr = { .s_addr = 0L };
 	char xpath[XPATH_MAXLEN];
 
-	if (!ifaddr_str && ospf_per_iface_xpath(xpath, sizeof(xpath), ifp,
-						"/retransmit-interval") == 0) {
+	if (!ifaddr_str &&
+	    ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/retransmit-interval") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -9373,16 +9359,15 @@ DEFPY (no_ip_ospf_gr_hdelay,
 	return CMD_SUCCESS;
 }
 
-static int ospf_transmit_delay_set_apply(struct vty *vty, struct interface *ifp,
-					 uint32_t seconds, const char *ifaddr_str)
+static int ospf_transmit_delay_set_apply(struct vty *vty, struct interface *ifp, uint32_t seconds,
+					 const char *ifaddr_str)
 {
 	struct ospf_if_params *params;
 	struct in_addr addr = { .s_addr = 0L };
 	char xpath[XPATH_MAXLEN];
 	char buf[16];
 
-	if (!ifaddr_str && ospf_per_iface_xpath(xpath, sizeof(xpath), ifp,
-						"/transmit-delay") == 0) {
+	if (!ifaddr_str && ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/transmit-delay") == 0) {
 		snprintf(buf, sizeof(buf), "%u", seconds);
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, buf);
 		return nb_cli_apply_changes(vty, NULL);
@@ -9391,8 +9376,7 @@ static int ospf_transmit_delay_set_apply(struct vty *vty, struct interface *ifp,
 	params = IF_DEF_PARAMS(ifp);
 	if (ifaddr_str) {
 		if (!inet_aton(ifaddr_str, &addr)) {
-			vty_out(vty,
-				"Please specify interface address by A.B.C.D\n");
+			vty_out(vty, "Please specify interface address by A.B.C.D\n");
 			return CMD_WARNING_CONFIG_FAILED;
 		}
 		params = ospf_get_if_params(ifp, addr);
@@ -9411,8 +9395,7 @@ static int ospf_transmit_delay_unset_apply(struct vty *vty, struct interface *if
 	struct in_addr addr = { .s_addr = 0L };
 	char xpath[XPATH_MAXLEN];
 
-	if (!ifaddr_str && ospf_per_iface_xpath(xpath, sizeof(xpath), ifp,
-						"/transmit-delay") == 0) {
+	if (!ifaddr_str && ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/transmit-delay") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -9513,8 +9496,7 @@ static int ospf_iface_area_xpath(char *xpath, size_t size, const struct ospf *os
 	ret = snprintf(xpath, size,
 		       OSPFD_IETF_ROUTING_PROTOCOL_XPATH
 		       "/ietf-ospf:ospf/areas/area[area-id='%s']/interfaces/interface[name='%s']",
-		       ospfd_ietf_ospf_instance_name(ospf, instance_name,
-						     sizeof(instance_name)),
+		       ospfd_ietf_ospf_instance_name(ospf, instance_name, sizeof(instance_name)),
 		       area_id_str, ifname);
 	if (ret < 0 || (size_t)ret >= size)
 		return -1;
@@ -9567,9 +9549,8 @@ DEFPY_YANG (ip_ospf_area,
 				has_network = true;
 				break;
 			}
-		if (!has_network &&
-		    ospf_iface_area_xpath(xpath, sizeof(xpath), ospf_inst,
-					  areaid, ifp->name) == 0) {
+		if (!has_network && ospf_iface_area_xpath(xpath, sizeof(xpath), ospf_inst, areaid,
+							  ifp->name) == 0) {
 			nb_cli_enqueue_change(vty, xpath, NB_OP_CREATE, NULL);
 			return nb_cli_apply_changes(vty, NULL);
 		}
@@ -9707,14 +9688,12 @@ DEFPY_YANG (no_ip_ospf_area,
 	if (!instance && !ifaddr_str && ospf_inst) {
 		params = IF_DEF_PARAMS(ifp);
 		if (!OSPF_IF_PARAM_CONFIGURED(params, if_area)) {
-			vty_out(vty,
-				"Can't find specified interface area configuration.\n");
+			vty_out(vty, "Can't find specified interface area configuration.\n");
 			return CMD_WARNING_CONFIG_FAILED;
 		}
-		inet_ntop(AF_INET, &params->if_area, area_id_str,
-			  sizeof(area_id_str));
-		if (ospf_iface_area_xpath(xpath, sizeof(xpath), ospf_inst,
-					  area_id_str, ifp->name) == 0) {
+		inet_ntop(AF_INET, &params->if_area, area_id_str, sizeof(area_id_str));
+		if (ospf_iface_area_xpath(xpath, sizeof(xpath), ospf_inst, area_id_str,
+					  ifp->name) == 0) {
 			nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 			return nb_cli_apply_changes(vty, NULL);
 		}
@@ -10240,8 +10219,7 @@ DEFPY_YANG (ospf_distance,
 	VTY_DECLVAR_INSTANCE_CONTEXT(ospf, ospf);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-				    "/preference/all") != 0)
+	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/preference/all") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, distance_str);
 	return nb_cli_apply_changes(vty, NULL);
@@ -10257,8 +10235,7 @@ DEFPY_YANG (no_ospf_distance,
 	VTY_DECLVAR_INSTANCE_CONTEXT(ospf, ospf);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-				    "/preference/all") != 0)
+	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/preference/all") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 	return nb_cli_apply_changes(vty, NULL);
@@ -10294,8 +10271,8 @@ DEFPY_YANG (no_ospf_distance_ospf,
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 	}
 	if (external || all_scopes) {
-		if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-					    "/preference/external") != 0)
+		if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/preference/external") !=
+		    0)
 			return CMD_WARNING_CONFIG_FAILED;
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 	}
@@ -10317,24 +10294,21 @@ DEFPY_YANG (ospf_distance_ospf,
 	VTY_DECLVAR_INSTANCE_CONTEXT(ospf, ospf);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-				    "/preference/intra-area") != 0)
+	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/preference/intra-area") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	if (intra)
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, intra_str);
 	else
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 
-	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-				    "/preference/inter-area") != 0)
+	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/preference/inter-area") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	if (inter)
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, inter_str);
 	else
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 
-	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-				    "/preference/external") != 0)
+	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/preference/external") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	if (external)
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, external_str);
@@ -10492,8 +10466,8 @@ DEFPY_YANG(ip_ospf_prefix_suppression, ip_ospf_prefix_suppression_addr_cmd,
 	struct ospf_if_params *params;
 	char xpath[XPATH_MAXLEN];
 
-	if (!ip_addr_str && ospf_per_iface_xpath(xpath, sizeof(xpath), ifp,
-						 "/prefix-suppression") == 0) {
+	if (!ip_addr_str &&
+	    ospf_per_iface_xpath(xpath, sizeof(xpath), ifp, "/prefix-suppression") == 0) {
 		if (no)
 			nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 		else
@@ -10609,8 +10583,7 @@ DEFPY_YANG (ospf_max_metric_router_lsa_admin,
 	VTY_DECLVAR_INSTANCE_CONTEXT(ospf, ospf);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-				    "/stub-router/always") != 0)
+	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/stub-router/always") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	nb_cli_enqueue_change(vty, xpath, NB_OP_CREATE, NULL);
 	return nb_cli_apply_changes(vty, NULL);
@@ -10627,8 +10600,7 @@ DEFPY_YANG (no_ospf_max_metric_router_lsa_admin,
 	VTY_DECLVAR_INSTANCE_CONTEXT(ospf, ospf);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf,
-				    "/stub-router/always") != 0)
+	if (ospf_per_instance_xpath(xpath, sizeof(xpath), ospf, "/stub-router/always") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 	return nb_cli_apply_changes(vty, NULL);

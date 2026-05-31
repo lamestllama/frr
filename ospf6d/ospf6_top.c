@@ -844,15 +844,13 @@ static int ospf6_router_id_xpath(char *xpath, size_t size, const struct ospf6 *o
  * instance keys come from FRR-side context rather than a vty xpath push.
  * Returns -1 on truncation.
  */
-int ospf6_per_instance_xpath(char *xpath, size_t size,
-			     const struct ospf6 *o, const char *leaf)
+int ospf6_per_instance_xpath(char *xpath, size_t size, const struct ospf6 *o, const char *leaf)
 {
 	int ret;
 
 	if (!o || !leaf)
 		return -1;
-	ret = snprintf(xpath, size,
-		       OSPF6D_IETF_ROUTING_PROTOCOL_XPATH "/ietf-ospf:ospf%s",
+	ret = snprintf(xpath, size, OSPF6D_IETF_ROUTING_PROTOCOL_XPATH "/ietf-ospf:ospf%s",
 		       o->name ? o->name : VRF_DEFAULT_NAME, leaf);
 	if (ret < 0 || (size_t)ret >= size)
 		return -1;
@@ -1055,8 +1053,7 @@ DEFPY_YANG (ospf6_distance,
 	VTY_DECLVAR_CONTEXT(ospf6, o);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-				     "/preference/all") != 0)
+	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/preference/all") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, distance_str);
 	return nb_cli_apply_changes(vty, NULL);
@@ -1072,8 +1069,7 @@ DEFPY_YANG (no_ospf6_distance,
 	VTY_DECLVAR_CONTEXT(ospf6, o);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-				     "/preference/all") != 0)
+	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/preference/all") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 	return nb_cli_apply_changes(vty, NULL);
@@ -1094,24 +1090,21 @@ DEFPY_YANG (ospf6_distance_ospf6,
 	VTY_DECLVAR_CONTEXT(ospf6, o);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-				     "/preference/intra-area") != 0)
+	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/preference/intra-area") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	if (intra)
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, intra_str);
 	else
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 
-	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-				     "/preference/inter-area") != 0)
+	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/preference/inter-area") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	if (inter)
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, inter_str);
 	else
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 
-	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-				     "/preference/external") != 0)
+	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/preference/external") != 0)
 		return CMD_WARNING_CONFIG_FAILED;
 	if (external)
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, external_str);
@@ -1139,20 +1132,19 @@ DEFPY_YANG (no_ospf6_distance_ospf6,
 	bool all_scopes = (!intra && !inter && !external);
 
 	if (intra || all_scopes) {
-		if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-					     "/preference/intra-area") != 0)
+		if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/preference/intra-area") !=
+		    0)
 			return CMD_WARNING_CONFIG_FAILED;
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 	}
 	if (inter || all_scopes) {
-		if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-					     "/preference/inter-area") != 0)
+		if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/preference/inter-area") !=
+		    0)
 			return CMD_WARNING_CONFIG_FAILED;
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 	}
 	if (external || all_scopes) {
-		if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-					     "/preference/external") != 0)
+		if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/preference/external") != 0)
 			return CMD_WARNING_CONFIG_FAILED;
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 	}
@@ -1249,13 +1241,11 @@ DEFPY_YANG(ospf6_max_multipath,
 	char xpath[XPATH_MAXLEN];
 
 	if (maxpaths > MULTIPATH_NUM) {
-		vty_out(vty, "%% maximum-paths exceeds platform max %u\n",
-			MULTIPATH_NUM);
+		vty_out(vty, "%% maximum-paths exceeds platform max %u\n", MULTIPATH_NUM);
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
-	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-				     "/spf-control/paths") == 0) {
+	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/spf-control/paths") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, maxpaths_str);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -1274,8 +1264,7 @@ DEFPY_YANG(no_ospf6_max_multipath,
 	VTY_DECLVAR_CONTEXT(ospf6, o);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-				     "/spf-control/paths") == 0) {
+	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/spf-control/paths") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 		return nb_cli_apply_changes(vty, NULL);
 	}

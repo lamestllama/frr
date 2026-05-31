@@ -1939,8 +1939,7 @@ DEFPY_YANG (ipv6_ospf6_area,
 		snprintf(xpath, sizeof(xpath),
 			 OSPF6D_IETF_ROUTING_PROTOCOL_XPATH
 			 "/ietf-ospf:ospf/areas/area[area-id='%s']/interfaces/interface[name='%s']",
-			 o6->name ? o6->name : VRF_DEFAULT_NAME, area_id_str,
-			 ifp->name);
+			 o6->name ? o6->name : VRF_DEFAULT_NAME, area_id_str, ifp->name);
 		nb_cli_enqueue_change(vty, xpath, NB_OP_CREATE, NULL);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -1984,8 +1983,7 @@ DEFPY_YANG (no_ipv6_ospf6_area,
 		snprintf(xpath, sizeof(xpath),
 			 OSPF6D_IETF_ROUTING_PROTOCOL_XPATH
 			 "/ietf-ospf:ospf/areas/area[area-id='%s']/interfaces/interface[name='%s']",
-			 o6->name ? o6->name : VRF_DEFAULT_NAME, area_id_str,
-			 ifp->name);
+			 o6->name ? o6->name : VRF_DEFAULT_NAME, area_id_str, ifp->name);
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -2107,8 +2105,7 @@ DEFUN (no_ipv6_ospf6_ifmtu,
  * to direct mutation. Returns 0 on success and writes the xpath into
  * buf; returns -1 if YANG is not applicable.
  */
-int ospf6_per_iface_xpath(char *xpath, size_t size, const struct interface *ifp,
-			  const char *leaf)
+int ospf6_per_iface_xpath(char *xpath, size_t size, const struct interface *ifp, const char *leaf)
 {
 	const struct ospf6_interface *oi;
 	const struct ospf6 *ospf6;
@@ -2216,8 +2213,8 @@ DEFPY_YANG (auto_cost_reference_bandwidth,
 	VTY_DECLVAR_CONTEXT(ospf6, o);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-				     "/auto-cost/reference-bandwidth") != 0)
+	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/auto-cost/reference-bandwidth") !=
+	    0)
 		return CMD_WARNING_CONFIG_FAILED;
 	nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, refbw_str);
 	return nb_cli_apply_changes(vty, NULL);
@@ -2234,8 +2231,8 @@ DEFPY_YANG (no_auto_cost_reference_bandwidth,
 	VTY_DECLVAR_CONTEXT(ospf6, o);
 	char xpath[XPATH_MAXLEN];
 
-	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o,
-				     "/auto-cost/reference-bandwidth") != 0)
+	if (ospf6_per_instance_xpath(xpath, sizeof(xpath), o, "/auto-cost/reference-bandwidth") !=
+	    0)
 		return CMD_WARNING_CONFIG_FAILED;
 	nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 	return nb_cli_apply_changes(vty, NULL);
@@ -2515,8 +2512,7 @@ DEFPY_YANG (ipv6_ospf6_transmitdelay,
 	char xpath[XPATH_MAXLEN];
 
 	assert(ifp);
-	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp,
-				  "/transmit-delay") == 0) {
+	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp, "/transmit-delay") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, interval_str);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -2543,8 +2539,7 @@ DEFPY_YANG (no_ipv6_ospf6_transmitdelay,
 	char xpath[XPATH_MAXLEN];
 
 	assert(ifp);
-	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp,
-				  "/transmit-delay") == 0) {
+	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp, "/transmit-delay") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -2571,8 +2566,7 @@ DEFPY_YANG (ipv6_ospf6_retransmitinterval,
 	char xpath[XPATH_MAXLEN];
 
 	assert(ifp);
-	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp,
-				  "/retransmit-interval") == 0) {
+	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp, "/retransmit-interval") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, interval_str);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -2599,8 +2593,7 @@ DEFPY_YANG (no_ipv6_ospf6_retransmitinterval,
 	char xpath[XPATH_MAXLEN];
 
 	assert(ifp);
-	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp,
-				  "/retransmit-interval") == 0) {
+	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp, "/retransmit-interval") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -2926,8 +2919,7 @@ DEFPY_YANG (ipv6_ospf6_network,
 
 	assert(ifp);
 
-	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp,
-				  "/interface-type") == 0) {
+	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp, "/interface-type") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_MODIFY, network);
 		return nb_cli_apply_changes(vty, NULL);
 	}
@@ -2981,8 +2973,7 @@ DEFPY_YANG (no_ipv6_ospf6_network,
 
 	assert(ifp);
 
-	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp,
-				  "/interface-type") == 0) {
+	if (ospf6_per_iface_xpath(xpath, sizeof(xpath), ifp, "/interface-type") == 0) {
 		nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 		return nb_cli_apply_changes(vty, NULL);
 	}

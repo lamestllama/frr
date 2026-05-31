@@ -287,8 +287,8 @@ extern void ospf6_auth_write_config(struct vty *vty,
  * not yet bound to an OSPFv3 area -- callers should fall back to
  * direct mutation in that case.
  */
-extern int ospf6_per_iface_xpath(char *xpath, size_t size,
-				 const struct interface *ifp, const char *leaf);
+extern int ospf6_per_iface_xpath(char *xpath, size_t size, const struct interface *ifp,
+				 const char *leaf);
 DECLARE_HOOK(ospf6_interface_change,
 	     (struct ospf6_interface * oi, int state, int old_state),
 	     (oi, state, old_state));
