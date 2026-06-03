@@ -55,6 +55,11 @@ static bool ospf6d_ietf_ospf_type_is(const char *val)
 		       !strcmp(val, "ietf-ospf:ospfv3"));
 }
 
+static int ospf6d_ietf_ospf_parse_error(enum nb_event event)
+{
+	return event == NB_EV_VALIDATE ? NB_ERR_VALIDATION : NB_ERR;
+}
+
 /*
  * XPath: /ietf-routing:routing/control-plane-protocols/control-plane-protocol
  *
@@ -168,6 +173,15 @@ static int ospf6d_ietf_ospf_resolve_instance(const struct lyd_node *dnode, enum 
 	return NB_OK;
 }
 
+static bool ospf6d_ietf_ospf_resolve_destroy_instance(struct nb_cb_destroy_args *args,
+						      struct ospf6 **ospf)
+{
+	*ospf = NULL;
+	if (args->event == NB_EV_APPLY)
+		*ospf = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
+
+	return *ospf != NULL;
+}
 
 /*
  * XPath: /ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/explicit-router-id
@@ -200,11 +214,7 @@ int ospf6d_ietf_ospf_explicit_router_id_destroy(struct nb_cb_destroy_args *args)
 {
 	struct ospf6 *ospf6;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
+	if (!ospf6d_ietf_ospf_resolve_destroy_instance(args, &ospf6))
 		return NB_OK;
 
 	ospf6->router_id_static = 0;
@@ -260,7 +270,7 @@ int ospf6d_ietf_ospf_areas_area_create(struct nb_cb_create_args *args)
 		return NB_OK;
 
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 
 	area = ospf6_area_lookup(area_id, ospf6);
 	if (!area)
@@ -275,15 +285,11 @@ int ospf6d_ietf_ospf_areas_area_destroy(struct nb_cb_destroy_args *args)
 	struct ospf6_area *area;
 	uint32_t area_id;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
+	if (!ospf6d_ietf_ospf_resolve_destroy_instance(args, &ospf6))
 		return NB_OK;
 
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 
 	area = ospf6_area_lookup(area_id, ospf6);
 	if (!area)
@@ -353,7 +359,7 @@ int ospf6d_ietf_ospf_areas_area_type_modify(struct nb_cb_modify_args *args)
 		return NB_OK;
 
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 
 	/*
 	 * Idempotent at APPLY: if the area was torn down between VALIDATE
@@ -379,7 +385,7 @@ int ospf6d_ietf_ospf_areas_area_type_modify(struct nb_cb_modify_args *args)
 		if (!ospf6_area_nssa_set(ospf6, area))
 			return NB_ERR_INCONSISTENCY;
 	} else {
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	}
 
 	return NB_OK;
@@ -414,7 +420,7 @@ int ospf6d_ietf_ospf_areas_area_summary_modify(struct nb_cb_modify_args *args)
 	if (args->event != NB_EV_APPLY)
 		return NB_OK;
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	area = ospf6_area_lookup(area_id, ospf6);
 	if (!area)
 		return NB_OK;
@@ -433,14 +439,10 @@ int ospf6d_ietf_ospf_areas_area_summary_destroy(struct nb_cb_destroy_args *args)
 	struct ospf6_area *area;
 	uint32_t area_id;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
+	if (!ospf6d_ietf_ospf_resolve_destroy_instance(args, &ospf6))
 		return NB_OK;
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	area = ospf6_area_lookup(area_id, ospf6);
 	if (!area)
 		return NB_OK;
@@ -571,6 +573,65 @@ static int ospf6d_ietf_ospf_resolve_interface(const struct ospf6 *ospf,
 	return NB_OK;
 }
 
+static int ospf6d_ietf_ospf_resolve_modify_interface(struct nb_cb_modify_args *args,
+						     struct ospf6 **ospf,
+						     struct interface **ifp)
+{
+	int ret;
+
+	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event,
+						args->errmsg, args->errmsg_len,
+						ospf);
+	if (ret != NB_OK || !*ospf)
+		return ret;
+
+	ret = ospf6d_ietf_ospf_resolve_interface(*ospf, args->dnode, args->event,
+						 args->errmsg, args->errmsg_len,
+						 ifp);
+	if (ret != NB_OK || !*ifp)
+		return ret;
+
+	return NB_OK;
+}
+
+static int ospf6d_ietf_ospf_resolve_create_interface(struct nb_cb_create_args *args,
+						     struct ospf6 **ospf,
+						     struct interface **ifp)
+{
+	int ret;
+
+	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event,
+						args->errmsg, args->errmsg_len,
+						ospf);
+	if (ret != NB_OK || !*ospf)
+		return ret;
+
+	ret = ospf6d_ietf_ospf_resolve_interface(*ospf, args->dnode, args->event,
+						 args->errmsg, args->errmsg_len,
+						 ifp);
+	if (ret != NB_OK || !*ifp)
+		return ret;
+
+	return NB_OK;
+}
+
+static bool ospf6d_ietf_ospf_resolve_destroy_interface(struct nb_cb_destroy_args *args,
+						       struct ospf6 **ospf,
+						       struct interface **ifp)
+{
+	*ospf = NULL;
+	*ifp = NULL;
+	if (args->event != NB_EV_APPLY)
+		return false;
+
+	*ospf = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
+	if (!*ospf)
+		return false;
+
+	*ifp = ospf6d_ietf_ospf_interface_from_dnode(*ospf, args->dnode);
+	return *ifp != NULL;
+}
+
 
 /*
  * XPath: /ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface
@@ -588,14 +649,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_create(struct nb_cb_create_
 	struct ospf6_interface *oi;
 	uint32_t area_id;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_create_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	if (args->event == NB_EV_VALIDATE) {
@@ -606,7 +661,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_create(struct nb_cb_create_
 	}
 
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return ospf6d_ietf_ospf_parse_error(args->event);
 
 	if (args->event != NB_EV_APPLY)
 		return NB_OK;
@@ -630,15 +685,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_destroy(struct nb_cb_destro
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 
 	oi = (struct ospf6_interface *)ifp->info;
@@ -678,14 +725,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_cost_modify(struct nb_cb_mo
 	struct ospf6_interface *oi;
 	uint32_t cost;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_modify_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	if (args->event != NB_EV_APPLY)
@@ -712,14 +753,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_cost_destroy(struct nb_cb_d
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 
 	oi = (struct ospf6_interface *)ifp->info;
@@ -751,14 +785,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_hello_interval_modify(
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_modify_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	if (args->event != NB_EV_APPLY)
@@ -785,15 +813,9 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_hello_interval_destroy(
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	if (args->event != NB_EV_APPLY)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
-		return NB_OK;
 	oi = (struct ospf6_interface *)ifp->info;
 	if (!oi)
 		return NB_OK;
@@ -812,14 +834,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_dead_interval_modify(
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_modify_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	if (args->event != NB_EV_APPLY)
@@ -839,15 +855,9 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_dead_interval_destroy(
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	if (args->event != NB_EV_APPLY)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
-		return NB_OK;
 	oi = (struct ospf6_interface *)ifp->info;
 	if (!oi)
 		return NB_OK;
@@ -865,14 +875,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_retransmit_interval_modify(
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_modify_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	if (args->event != NB_EV_APPLY)
@@ -892,14 +896,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_retransmit_interval_destroy
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 	oi = (struct ospf6_interface *)ifp->info;
 	if (!oi)
@@ -917,14 +914,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_priority_modify(struct nb_c
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_modify_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	if (args->event != NB_EV_APPLY)
@@ -950,14 +941,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_priority_destroy(struct nb_
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 	oi = (struct ospf6_interface *)ifp->info;
 	if (!oi)
@@ -976,14 +960,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_mtu_ignore_modify(struct nb
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_modify_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	if (args->event != NB_EV_APPLY)
@@ -1003,14 +981,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_mtu_ignore_destroy(
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 	oi = (struct ospf6_interface *)ifp->info;
 	if (!oi)
@@ -1029,14 +1000,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_transmit_delay_modify(
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_modify_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	if (args->event != NB_EV_APPLY)
@@ -1056,14 +1021,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_transmit_delay_destroy(
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 	oi = (struct ospf6_interface *)ifp->info;
 	if (!oi)
@@ -1119,9 +1077,9 @@ int ospf6d_ietf_ospf_areas_area_ranges_range_create(struct nb_cb_create_args *ar
 	if (args->event != NB_EV_APPLY)
 		return NB_OK;
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	if (ospf6d_ietf_ospf_range_prefix_from_dnode(args->dnode, &p) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 
 	oa = ospf6_area_lookup(area_id, ospf6);
 	if (!oa)
@@ -1152,16 +1110,12 @@ int ospf6d_ietf_ospf_areas_area_ranges_range_destroy(struct nb_cb_destroy_args *
 	struct prefix p;
 	struct ospf6_route *range;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
+	if (!ospf6d_ietf_ospf_resolve_destroy_instance(args, &ospf6))
 		return NB_OK;
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	if (ospf6d_ietf_ospf_range_prefix_from_dnode(args->dnode, &p) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 
 	oa = ospf6_area_lookup(area_id, ospf6);
 	if (!oa)
@@ -1197,9 +1151,9 @@ int ospf6d_ietf_ospf_areas_area_ranges_range_advertise_modify(struct nb_cb_modif
 	if (args->event != NB_EV_APPLY)
 		return NB_OK;
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	if (ospf6d_ietf_ospf_range_prefix_from_dnode(args->dnode, &p) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	oa = ospf6_area_lookup(area_id, ospf6);
 	if (!oa)
 		return NB_OK;
@@ -1225,16 +1179,12 @@ int ospf6d_ietf_ospf_areas_area_ranges_range_advertise_destroy(struct nb_cb_dest
 	struct prefix p;
 	struct ospf6_route *range;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
+	if (!ospf6d_ietf_ospf_resolve_destroy_instance(args, &ospf6))
 		return NB_OK;
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	if (ospf6d_ietf_ospf_range_prefix_from_dnode(args->dnode, &p) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	oa = ospf6_area_lookup(area_id, ospf6);
 	if (!oa)
 		return NB_OK;
@@ -1267,9 +1217,9 @@ int ospf6d_ietf_ospf_areas_area_ranges_range_cost_modify(struct nb_cb_modify_arg
 	if (args->event != NB_EV_APPLY)
 		return NB_OK;
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	if (ospf6d_ietf_ospf_range_prefix_from_dnode(args->dnode, &p) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	oa = ospf6_area_lookup(area_id, ospf6);
 	if (!oa)
 		return NB_OK;
@@ -1291,16 +1241,12 @@ int ospf6d_ietf_ospf_areas_area_ranges_range_cost_destroy(struct nb_cb_destroy_a
 	struct prefix p;
 	struct ospf6_route *range;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
+	if (!ospf6d_ietf_ospf_resolve_destroy_instance(args, &ospf6))
 		return NB_OK;
 	if (ospf6d_ietf_ospf_area_id_from_dnode(args->dnode, &area_id) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	if (ospf6d_ietf_ospf_range_prefix_from_dnode(args->dnode, &p) < 0)
-		return NB_ERR_VALIDATION;
+		return NB_ERR;
 	oa = ospf6_area_lookup(area_id, ospf6);
 	if (!oa)
 		return NB_OK;
@@ -1345,14 +1291,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_interface_type_modify(
 	const char *val;
 	int type;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_modify_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	/*
@@ -1381,7 +1321,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_interface_type_modify(
 		if (args->event == NB_EV_VALIDATE)
 			snprintf(args->errmsg, args->errmsg_len,
 				 "unsupported interface-type enum '%s' for ospf6", val);
-		return NB_ERR_VALIDATION;
+		return ospf6d_ietf_ospf_parse_error(args->event);
 	}
 
 	if (args->event != NB_EV_APPLY)
@@ -1409,14 +1349,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_interface_type_destroy(
 	struct ospf6_interface *oi;
 	uint8_t type;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 	oi = (struct ospf6_interface *)ifp->info;
 	if (!oi)
@@ -1446,14 +1379,8 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_passive_modify(struct nb_cb
 	struct ospf6_neighbor *on;
 	bool passive;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
-	if (ret != NB_OK || !ospf6)
-		return ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp)
+	ret = ospf6d_ietf_ospf_resolve_modify_interface(args, &ospf6, &ifp);
+	if (ret != NB_OK || !ospf6 || !ifp)
 		return ret;
 
 	if (args->event != NB_EV_APPLY)
@@ -1488,14 +1415,7 @@ int ospf6d_ietf_ospf_areas_area_interfaces_interface_passive_destroy(struct nb_c
 	struct interface *ifp;
 	struct ospf6_interface *oi;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
+	if (!ospf6d_ietf_ospf_resolve_destroy_interface(args, &ospf6, &ifp))
 		return NB_OK;
 	oi = (struct ospf6_interface *)ifp->info;
 	if (!oi)
@@ -1913,6 +1833,7 @@ int ospf6d_ietf_ospf_graceful_restart_restart_interval_destroy(struct nb_cb_dest
 
 	if (args->event != NB_EV_APPLY)
 		return NB_OK;
+
 	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
 	if (!ospf6)
 		return NB_OK;
@@ -1993,10 +1914,12 @@ int ospf6d_ietf_ospf_graceful_restart_helper_strict_lsa_checking_destroy(struct 
 }
 
 /*
- * RFC 9129 BFD timer leaves: see the ospfd companion notes.  FRR's v3
- * `bfd_config` is embedded in `ospf6_interface`, no allocation needed;
- * a session refresh is achieved via `ospf6_bfd_reg_dereg_all_nbr(oi,
- * true)`.  Disable tears every session down.
+ * RFC 9129 BFD leaves: see the ospfd companion notes.  Parameter leaves are
+ * accepted regardless of `/bfd/enabled` state.  They are stored in the YANG
+ * running datastore while disabled, and applied to the embedded
+ * `ospf6_interface` BFD state when BFD is enabled.  A session refresh is
+ * achieved via `ospf6_bfd_reg_dereg_all_nbr(oi, true)`.  Disable tears every
+ * session down.
  */
 #define OSPF6D_IETF_BFD_MIN_INTERVAL_US (50UL * 1000)
 #define OSPF6D_IETF_BFD_MAX_INTERVAL_US (60000UL * 1000)
@@ -2020,207 +1943,177 @@ static int ospf6d_ietf_bfd_validate_interval_us(uint32_t us, const char *leaf, c
 	return NB_OK;
 }
 
-/*
- * Resolve the OSPFv3 interface for a per-interface BFD callback.
- * Returns NB_OK + *oi_out set on success, NB_OK + NULL when the
- * interface or its OSPFv3 state does not exist (callers should bail
- * out cleanly).
- */
-static int ospf6d_ietf_bfd_resolve_oi(struct nb_cb_modify_args *args, struct ospf6 *ospf6,
-				      struct ospf6_interface **oi_out)
+static void ospf6d_ietf_bfd_sync_config_from_dnode(struct ospf6_interface *oi,
+						   const struct lyd_node *dnode)
 {
-	struct interface *ifp;
-	int ret;
-
-	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, args->event, args->errmsg,
-						 args->errmsg_len, &ifp);
-	if (ret != NB_OK || !ifp) {
-		*oi_out = NULL;
-		return ret;
-	}
-	*oi_out = ifp->info;
-	return NB_OK;
+	oi->bfd_config.detection_multiplier =
+		yang_dnode_get_uint8(dnode, "local-multiplier");
+	oi->bfd_config.min_rx =
+		yang_dnode_get_uint32(dnode, "required-min-rx-interval") / 1000;
+	oi->bfd_config.min_tx =
+		yang_dnode_get_uint32(dnode, "desired-min-tx-interval") / 1000;
 }
 
-int ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_enabled_modify(struct nb_cb_modify_args *args)
+/*
+ * XPath: .../ospf/areas/area/interfaces/interface/bfd
+ *
+ * The BFD container is an aggregate. Leaf callbacks maintain daemon
+ * configuration state, then this finish callback applies the settled state to
+ * BFD sessions once per transaction.
+ */
+void ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_apply_finish(struct nb_cb_apply_finish_args *args)
 {
 	struct ospf6 *ospf6;
+	struct interface *ifp;
 	struct ospf6_interface *oi;
 	int ret;
 	bool enabled;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
+	/* apply_finish is APPLY-only; the literal event is intentional. */
+	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, NB_EV_APPLY, args->errmsg,
 						args->errmsg_len, &ospf6);
 	if (ret != NB_OK || !ospf6)
-		return ret;
-	ret = ospf6d_ietf_bfd_resolve_oi(args, ospf6, &oi);
-	if (ret != NB_OK || !oi)
-		return ret;
+		return;
+	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode, NB_EV_APPLY,
+						 args->errmsg, args->errmsg_len,
+						 &ifp);
+	if (ret != NB_OK || !ifp)
+		return;
+	oi = ifp->info;
+	if (!oi)
+		return;
 
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	enabled = yang_dnode_get_bool(args->dnode, NULL);
+	enabled = yang_dnode_get_bool(args->dnode, "enabled");
+	ospf6d_ietf_bfd_sync_config_from_dnode(oi, args->dnode);
 	if (enabled) {
-		if (!oi->bfd_config.enabled) {
-			oi->bfd_config.detection_multiplier = BFD_DEF_DETECT_MULT;
-			oi->bfd_config.min_rx = BFD_DEF_MIN_RX;
-			oi->bfd_config.min_tx = BFD_DEF_MIN_TX;
-		}
 		oi->bfd_config.enabled = true;
 		ospf6_bfd_reg_dereg_all_nbr(oi, true);
 	} else if (oi->bfd_config.enabled) {
 		oi->bfd_config.enabled = false;
 		ospf6_bfd_reg_dereg_all_nbr(oi, false);
 	}
+}
+
+/*
+ * XPath: .../ospf/areas/area/interfaces/interface/bfd/enabled
+ *
+ * Administrative BFD toggle. Actual session changes are done by the parent
+ * `/bfd` apply_finish callback after all BFD leaves have settled.
+ */
+int ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_enabled_modify(struct nb_cb_modify_args *args)
+{
+	struct ospf6 *ospf6;
+	struct interface *ifp;
+	int ret;
+
+	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event,
+						args->errmsg, args->errmsg_len,
+						&ospf6);
+	if (ret != NB_OK || !ospf6)
+		return ret;
+	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode,
+						 args->event, args->errmsg,
+						 args->errmsg_len, &ifp);
+	if (ret != NB_OK || !ifp)
+		return ret;
+	if (!ifp->info)
+		return NB_OK;
+
 	return NB_OK;
 }
 
 int ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_local_multiplier_modify(struct nb_cb_modify_args *args)
 {
 	struct ospf6 *ospf6;
+	struct interface *ifp;
 	struct ospf6_interface *oi;
 	int ret;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
+	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event,
+						args->errmsg, args->errmsg_len,
+						&ospf6);
 	if (ret != NB_OK || !ospf6)
 		return ret;
-	ret = ospf6d_ietf_bfd_resolve_oi(args, ospf6, &oi);
-	if (ret != NB_OK || !oi)
+	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode,
+						 args->event, args->errmsg,
+						 args->errmsg_len, &ifp);
+	if (ret != NB_OK || !ifp)
 		return ret;
-
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	oi->bfd_config.detection_multiplier = yang_dnode_get_uint8(args->dnode, NULL);
-	if (oi->bfd_config.enabled)
-		ospf6_bfd_reg_dereg_all_nbr(oi, true);
-	return NB_OK;
-}
-
-int ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_local_multiplier_destroy(struct nb_cb_destroy_args *args)
-{
-	struct ospf6 *ospf6;
-	struct interface *ifp;
-	struct ospf6_interface *oi;
-
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
-		return NB_OK;
 	oi = ifp->info;
 	if (!oi)
 		return NB_OK;
-	oi->bfd_config.detection_multiplier = BFD_DEF_DETECT_MULT;
-	if (oi->bfd_config.enabled)
-		ospf6_bfd_reg_dereg_all_nbr(oi, true);
+
+	/* APPLY is intentionally a no-op; the parent /bfd apply_finish applies. */
 	return NB_OK;
 }
 
 int ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_desired_min_tx_interval_modify(struct nb_cb_modify_args *args)
 {
 	struct ospf6 *ospf6;
+	struct interface *ifp;
 	struct ospf6_interface *oi;
 	int ret;
 	uint32_t us;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
+	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event,
+						args->errmsg, args->errmsg_len,
+						&ospf6);
 	if (ret != NB_OK || !ospf6)
 		return ret;
-	ret = ospf6d_ietf_bfd_resolve_oi(args, ospf6, &oi);
-	if (ret != NB_OK || !oi)
+	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode,
+						 args->event, args->errmsg,
+						 args->errmsg_len, &ifp);
+	if (ret != NB_OK || !ifp)
 		return ret;
+	oi = ifp->info;
+	if (!oi)
+		return NB_OK;
 
 	us = yang_dnode_get_uint32(args->dnode, NULL);
 	if (args->event == NB_EV_VALIDATE)
 		return ospf6d_ietf_bfd_validate_interval_us(us, "desired-min-tx-interval",
 							    args->errmsg, args->errmsg_len);
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	oi->bfd_config.min_tx = us / 1000;
-	if (oi->bfd_config.enabled)
-		ospf6_bfd_reg_dereg_all_nbr(oi, true);
+	/* APPLY is intentionally a no-op; the parent /bfd apply_finish applies. */
 	return NB_OK;
 }
 
 int ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_desired_min_tx_interval_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf6 *ospf6;
-	struct interface *ifp;
-	struct ospf6_interface *oi;
-
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
-		return NB_OK;
-	oi = ifp->info;
-	if (!oi)
-		return NB_OK;
-	oi->bfd_config.min_tx = BFD_DEF_MIN_TX;
-	if (oi->bfd_config.enabled)
-		ospf6_bfd_reg_dereg_all_nbr(oi, true);
 	return NB_OK;
 }
 
 int ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_required_min_rx_interval_modify(struct nb_cb_modify_args *args)
 {
 	struct ospf6 *ospf6;
+	struct interface *ifp;
 	struct ospf6_interface *oi;
 	int ret;
 	uint32_t us;
 
-	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event, args->errmsg,
-						args->errmsg_len, &ospf6);
+	ret = ospf6d_ietf_ospf_resolve_instance(args->dnode, args->event,
+						args->errmsg, args->errmsg_len,
+						&ospf6);
 	if (ret != NB_OK || !ospf6)
 		return ret;
-	ret = ospf6d_ietf_bfd_resolve_oi(args, ospf6, &oi);
-	if (ret != NB_OK || !oi)
+	ret = ospf6d_ietf_ospf_resolve_interface(ospf6, args->dnode,
+						 args->event, args->errmsg,
+						 args->errmsg_len, &ifp);
+	if (ret != NB_OK || !ifp)
 		return ret;
+	oi = ifp->info;
+	if (!oi)
+		return NB_OK;
 
 	us = yang_dnode_get_uint32(args->dnode, NULL);
 	if (args->event == NB_EV_VALIDATE)
 		return ospf6d_ietf_bfd_validate_interval_us(us, "required-min-rx-interval",
 							    args->errmsg, args->errmsg_len);
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-
-	oi->bfd_config.min_rx = us / 1000;
-	if (oi->bfd_config.enabled)
-		ospf6_bfd_reg_dereg_all_nbr(oi, true);
+	/* APPLY is intentionally a no-op; the parent /bfd apply_finish applies. */
 	return NB_OK;
 }
 
 int ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_required_min_rx_interval_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf6 *ospf6;
-	struct interface *ifp;
-	struct ospf6_interface *oi;
-
-	if (args->event != NB_EV_APPLY)
-		return NB_OK;
-	ospf6 = ospf6d_ietf_ospf_instance_from_dnode(args->dnode);
-	if (!ospf6)
-		return NB_OK;
-	ifp = ospf6d_ietf_ospf_interface_from_dnode(ospf6, args->dnode);
-	if (!ifp)
-		return NB_OK;
-	oi = ifp->info;
-	if (!oi)
-		return NB_OK;
-	oi->bfd_config.min_rx = BFD_DEF_MIN_RX;
-	if (oi->bfd_config.enabled)
-		ospf6_bfd_reg_dereg_all_nbr(oi, true);
 	return NB_OK;
 }
 

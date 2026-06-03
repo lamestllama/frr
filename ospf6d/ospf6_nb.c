@@ -333,6 +333,14 @@ const struct frr_yang_module_info ospf6d_ietf_ospf_info = {
 		},
 		{
 			.xpath = OSPF6D_IETF_OSPF_XPATH
+				 "/areas/area/interfaces/interface/bfd",
+			.cbs = {
+				.apply_finish = ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_apply_finish,
+			},
+			.cfg_opt_in = true,
+		},
+		{
+			.xpath = OSPF6D_IETF_OSPF_XPATH
 				 "/areas/area/interfaces/interface/bfd/enabled",
 			.cbs = {
 				.modify = ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_enabled_modify,
@@ -344,7 +352,6 @@ const struct frr_yang_module_info ospf6d_ietf_ospf_info = {
 				 "/areas/area/interfaces/interface/bfd/local-multiplier",
 			.cbs = {
 				.modify = ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_local_multiplier_modify,
-				.destroy = ospf6d_ietf_ospf_areas_area_interfaces_interface_bfd_local_multiplier_destroy,
 			},
 			.cfg_opt_in = true,
 		},

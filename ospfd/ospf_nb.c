@@ -411,6 +411,14 @@ const struct frr_yang_module_info ospfd_ietf_ospf_info = {
 		},
 		{
 			.xpath = OSPFD_IETF_OSPF_XPATH
+				 "/areas/area/interfaces/interface/bfd",
+			.cbs = {
+				.apply_finish = ospfd_ietf_ospf_areas_area_interfaces_interface_bfd_apply_finish,
+			},
+			.cfg_opt_in = true,
+		},
+		{
+			.xpath = OSPFD_IETF_OSPF_XPATH
 				 "/areas/area/interfaces/interface/bfd/enabled",
 			.cbs = {
 				.modify = ospfd_ietf_ospf_areas_area_interfaces_interface_bfd_enabled_modify,
@@ -422,7 +430,6 @@ const struct frr_yang_module_info ospfd_ietf_ospf_info = {
 				 "/areas/area/interfaces/interface/bfd/local-multiplier",
 			.cbs = {
 				.modify = ospfd_ietf_ospf_areas_area_interfaces_interface_bfd_local_multiplier_modify,
-				.destroy = ospfd_ietf_ospf_areas_area_interfaces_interface_bfd_local_multiplier_destroy,
 			},
 			.cfg_opt_in = true,
 		},
@@ -449,6 +456,7 @@ const struct frr_yang_module_info ospfd_ietf_ospf_info = {
 				 "/areas/area/interfaces/interface/static-neighbors/neighbor",
 			.cbs = {
 				.create = ospfd_ietf_ospf_areas_area_interfaces_interface_static_neighbors_neighbor_create,
+				.apply_finish = ospfd_ietf_ospf_areas_area_interfaces_interface_static_neighbors_neighbor_apply_finish,
 				.destroy = ospfd_ietf_ospf_areas_area_interfaces_interface_static_neighbors_neighbor_destroy,
 			},
 			.cfg_opt_in = true,
@@ -458,7 +466,6 @@ const struct frr_yang_module_info ospfd_ietf_ospf_info = {
 				 "/areas/area/interfaces/interface/static-neighbors/neighbor/poll-interval",
 			.cbs = {
 				.modify = ospfd_ietf_ospf_areas_area_interfaces_interface_static_neighbors_neighbor_poll_interval_modify,
-				.destroy = ospfd_ietf_ospf_areas_area_interfaces_interface_static_neighbors_neighbor_poll_interval_destroy,
 			},
 			.cfg_opt_in = true,
 		},
@@ -467,7 +474,6 @@ const struct frr_yang_module_info ospfd_ietf_ospf_info = {
 				 "/areas/area/interfaces/interface/static-neighbors/neighbor/priority",
 			.cbs = {
 				.modify = ospfd_ietf_ospf_areas_area_interfaces_interface_static_neighbors_neighbor_priority_modify,
-				.destroy = ospfd_ietf_ospf_areas_area_interfaces_interface_static_neighbors_neighbor_priority_destroy,
 			},
 			.cfg_opt_in = true,
 		},
