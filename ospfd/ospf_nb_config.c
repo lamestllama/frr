@@ -8804,15 +8804,7 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_create(struct nb_cb_create_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_create_apply_finish(args);
 }
 
 
@@ -8863,29 +8855,13 @@ routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_defa
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_metric_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_metric_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -8893,29 +8869,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_metric_type_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_metric_type_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
