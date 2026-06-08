@@ -394,6 +394,24 @@ lib_interface_ospf_gr_hello_delay_reset_addr(struct interface *ifp,
 	}
 }
 
+static void lib_interface_ospf_gr_hello_delay_reset(struct interface *ifp)
+{
+	struct route_node *rn;
+
+	if (!IF_OSPF_IF_INFO(ifp) || !IF_OIFS(ifp))
+		return;
+
+	for (rn = route_top(IF_OIFS(ifp)); rn; rn = route_next(rn)) {
+		struct ospf_interface *oi = rn->info;
+
+		if (!oi)
+			continue;
+
+		oi->gr.hello_delay.elapsed_seconds = 0;
+		event_cancel(&oi->gr.hello_delay.t_grace_send);
+	}
+}
+
 static int lib_interface_ospf_attachment_instance(const struct lyd_node *dnode)
 {
 	const struct lyd_node *attachment;
@@ -2772,6 +2790,20 @@ static void lib_interface_ospf_uint16_default_read(const struct lyd_node *dnode,
 		      : yang_get_default_uint16("%s", default_path);
 }
 
+static void lib_interface_ospf_bool_default_read(const struct lyd_node *dnode,
+						 const char *path,
+						 const char *default_path,
+						 bool *value,
+						 bool *configured)
+{
+	struct lyd_node *leaf;
+
+	leaf = yang_dnode_get(dnode, path);
+	*configured = leaf && !lyd_is_default(leaf);
+	*value = leaf ? yang_dnode_get_bool(leaf, NULL)
+		      : yang_get_default_bool("%s", default_path);
+}
+
 static void lib_interface_ospf_fast_hello_set(struct ospf_if_params *params,
 					      uint8_t multiplier,
 					      bool configured)
@@ -2784,7 +2816,7 @@ static void lib_interface_ospf_fast_hello_set(struct ospf_if_params *params,
 	params->fast_hello = multiplier;
 }
 
-static void lib_interface_ospf_timers_apply_finish(struct nb_cb_apply_finish_args *args)
+static void lib_interface_ospf_apply_finish(struct nb_cb_apply_finish_args *args)
 {
 	struct interface *ifp;
 	struct ospf_if_params *params;
@@ -2806,6 +2838,11 @@ static void lib_interface_ospf_timers_apply_finish(struct nb_cb_apply_finish_arg
 	uint8_t fast_hello;
 	bool nbr_update;
 	bool hello_update;
+	bool old_gr_hello_delay_configured;
+	bool gr_hello_delay_configured;
+	uint16_t gr_hello_delay;
+	bool mtu_ignore_configured;
+	bool mtu_ignore;
 
 	ifp = lib_interface_ospf_get_ifp(args->dnode);
 	params = lib_interface_ospf_get_params(args->dnode);
@@ -2885,6 +2922,29 @@ static void lib_interface_ospf_timers_apply_finish(struct nb_cb_apply_finish_arg
 		&transmit_delay_configured);
 	lib_interface_ospf_set_transmit_delay(params, transmit_delay,
 					      transmit_delay_configured);
+
+	lib_interface_ospf_bool_default_read(
+		args->dnode, "mtu-ignore", FRR_OSPFD_IFACE_XPATH "/mtu-ignore",
+		&mtu_ignore, &mtu_ignore_configured);
+	if (mtu_ignore_configured)
+		SET_IF_PARAM(params, mtu_ignore);
+	else
+		UNSET_IF_PARAM(params, mtu_ignore);
+	params->mtu_ignore = mtu_ignore ? 1 : 0;
+
+	old_gr_hello_delay_configured =
+		OSPF_IF_PARAM_CONFIGURED(params, v_gr_hello_delay);
+	lib_interface_ospf_uint16_default_read(
+		args->dnode, "graceful-restart/hello-delay",
+		FRR_OSPFD_IFACE_XPATH "/graceful-restart/hello-delay",
+		&gr_hello_delay, &gr_hello_delay_configured);
+	if (gr_hello_delay_configured)
+		SET_IF_PARAM(params, v_gr_hello_delay);
+	else
+		UNSET_IF_PARAM(params, v_gr_hello_delay);
+	params->v_gr_hello_delay = gr_hello_delay;
+	if (old_gr_hello_delay_configured && !gr_hello_delay_configured)
+		lib_interface_ospf_gr_hello_delay_reset(ifp);
 
 	if (nbr_update)
 		lib_interface_ospf_nbr_timer_update(ifp);
@@ -2983,56 +3043,13 @@ static int lib_interface_ospf_transmit_delay_destroy(struct nb_cb_destroy_args *
  */
 static int lib_interface_ospf_mtu_ignore_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_if_params *params;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		if (lyd_is_default(args->dnode))
-			UNSET_IF_PARAM(params, mtu_ignore);
-		else
-			SET_IF_PARAM(params, mtu_ignore);
-
-		params->mtu_ignore = yang_dnode_get_bool(args->dnode, NULL)
-					     ? 1
-					     : 0;
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int lib_interface_ospf_mtu_ignore_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf_if_params *params;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		UNSET_IF_PARAM(params, mtu_ignore);
-		params->mtu_ignore = yang_get_default_bool(
-					      FRR_OSPFD_IFACE_XPATH "/mtu-ignore")
-					     ? 1
-					     : 0;
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -3376,66 +3393,13 @@ static int lib_interface_ospf_neighbor_filter_destroy(struct nb_cb_destroy_args 
  */
 static int lib_interface_ospf_graceful_restart_hello_delay_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_if_params *params;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		SET_IF_PARAM(params, v_gr_hello_delay);
-		params->v_gr_hello_delay =
-			yang_dnode_get_uint16(args->dnode, NULL);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int lib_interface_ospf_graceful_restart_hello_delay_destroy(struct nb_cb_destroy_args *args)
 {
-	struct interface *ifp;
-	struct ospf_if_params *params;
-	struct route_node *rn;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = lib_interface_ospf_get_ifp(args->dnode);
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		UNSET_IF_PARAM(params, v_gr_hello_delay);
-		params->v_gr_hello_delay = yang_get_default_uint16(
-			FRR_OSPFD_IFACE_XPATH
-			"/graceful-restart/hello-delay");
-
-		if (!IF_OIFS(ifp))
-			return NB_OK;
-
-		for (rn = route_top(IF_OIFS(ifp)); rn; rn = route_next(rn)) {
-			struct ospf_interface *oi = rn->info;
-
-			if (!oi)
-				continue;
-
-			oi->gr.hello_delay.elapsed_seconds = 0;
-			event_cancel(&oi->gr.hello_delay.t_grace_send);
-		}
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -4937,6 +4901,23 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_instance_
 	return NB_OK;
 }
 
+static void
+routing_control_plane_protocols_control_plane_protocol_ospf_apply_finish(struct nb_cb_apply_finish_args *args)
+{
+	struct ospf *ospf;
+
+	ospf = routing_ospf_get(args->dnode);
+	ospf->proactive_arp = routing_ospf_get_bool_default(
+		args->dnode, "proactive-arp",
+		FRR_OSPFD_OSPF_XPATH "/proactive-arp");
+	ospf->forwarding_address_self = routing_ospf_get_bool_default(
+		args->dnode, "forwarding-address-self",
+		FRR_OSPFD_OSPF_XPATH "/forwarding-address-self");
+	ospf->write_oi_count = routing_ospf_get_uint8_default(
+		args->dnode, "write-multiplier",
+		FRR_OSPFD_OSPF_XPATH "/write-multiplier");
+}
+
 
 /*
  * XPath: /frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/abr-type
@@ -5031,40 +5012,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_auto_cost
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_proactive_arp_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		ospf->proactive_arp = yang_dnode_get_bool(args->dnode, NULL);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_proactive_arp_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		ospf->proactive_arp = yang_get_default_bool(
-			FRR_OSPFD_OSPF_XPATH "/proactive-arp");
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -5179,41 +5133,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_shutdown_
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_forwarding_address_self_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		ospf->forwarding_address_self =
-			yang_dnode_get_bool(args->dnode, NULL);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_forwarding_address_self_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		ospf->forwarding_address_self = yang_get_default_bool(
-			FRR_OSPFD_OSPF_XPATH "/forwarding-address-self");
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -5307,40 +5233,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_default_m
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_write_multiplier_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		ospf->write_oi_count = yang_dnode_get_uint8(args->dnode, NULL);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_write_multiplier_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		ospf->write_oi_count = yang_get_default_uint8(
-			FRR_OSPFD_OSPF_XPATH "/write-multiplier");
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -10085,7 +9984,7 @@ const struct frr_yang_module_info frr_ospfd_nb_info = {
 		{
 			.xpath = "/frr-interface:lib/interface/frr-ospfd:ospf",
 			.cbs = {
-				.apply_finish = lib_interface_ospf_timers_apply_finish,
+				.apply_finish = lib_interface_ospf_apply_finish,
 			}
 		},
 		{
@@ -10505,6 +10404,12 @@ const struct frr_yang_module_info frr_ospfd_nb_info = {
 			.cbs = {
 				.modify = routing_control_plane_protocols_control_plane_protocol_ospf_router_id_modify,
 				.destroy = routing_control_plane_protocols_control_plane_protocol_ospf_router_id_destroy,
+			}
+		},
+		{
+			.xpath = "/frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf",
+			.cbs = {
+				.apply_finish = routing_control_plane_protocols_control_plane_protocol_ospf_apply_finish,
 			}
 		},
 		{
