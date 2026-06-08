@@ -10336,342 +10336,94 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
 }
 
 /*
- * XPath: /frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/dead-interval
+ * XPath: /frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers
  */
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_dead_interval_modify(struct nb_cb_modify_args *args)
+static void routing_ospf_vlink_timer_read(const struct lyd_node *dnode,
+					  const char *name, uint32_t *value,
+					  bool *configured)
+{
+	struct lyd_node *leaf;
+
+	leaf = yang_dnode_get(dnode, name);
+	*configured = leaf && !lyd_is_default(leaf);
+	if (leaf)
+		*value = yang_dnode_get_uint16(leaf, NULL);
+	else
+		*value = yang_get_default_uint16(
+			FRR_OSPFD_AREA_VLINK_TIMERS_XPATH "/%s", name);
+}
+
+#define ROUTING_OSPF_VLINK_PARAM_CHANGED(PARAMS, FIELD, VALUE, CONFIGURED)    \
+	(OSPF_IF_PARAM_CONFIGURED((PARAMS), FIELD) != (CONFIGURED) ||         \
+	 (PARAMS)->FIELD != (VALUE))
+
+static void
+routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_apply_finish(struct nb_cb_apply_finish_args *args)
 {
 	struct ospf_if_params *params;
+	struct in_addr addr = { .s_addr = 0L };
 	struct interface *ifp;
-	uint16_t seconds;
+	char errmsg[256];
 	bool configured;
+	bool nbr_timer_update = false;
+	bool hello_update = false;
+	uint32_t value;
 
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_ERR_INCONSISTENCY;
+	ifp = routing_ospf_area_virtual_link_ifp(args->dnode, errmsg,
+						sizeof(errmsg));
+	if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
+		return;
 
-		params = IF_DEF_PARAMS(ifp);
-		configured = !lyd_is_default(args->dnode);
-		seconds = configured
-				  ? yang_dnode_get_uint16(args->dnode, NULL)
-				  : yang_get_default_uint16(
-					    FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-					    "/dead-interval");
-		lib_interface_ospf_set_dead_interval(params, seconds,
+	params = IF_DEF_PARAMS(ifp);
+
+	routing_ospf_vlink_timer_read(args->dnode, "dead-interval", &value,
+				      &configured);
+	if (ROUTING_OSPF_VLINK_PARAM_CHANGED(params, v_wait, value,
+					     configured)) {
+		lib_interface_ospf_set_dead_interval(params, value,
 						     configured);
-		lib_interface_ospf_nbr_timer_update(ifp);
-		break;
+		nbr_timer_update = true;
 	}
 
-	return NB_OK;
-}
-
-
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_dead_interval_destroy(struct nb_cb_destroy_args *args)
-{
-	struct ospf_if_params *params;
-	struct interface *ifp;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_OK;
-
-		params = IF_DEF_PARAMS(ifp);
-		lib_interface_ospf_set_dead_interval(
-			params,
-			yang_get_default_uint16(
-				FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-				"/dead-interval"),
-			false);
-		lib_interface_ospf_nbr_timer_update(ifp);
-		break;
-	}
-
-	return NB_OK;
-}
-
-/*
- * XPath: /frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/hello-interval
- */
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_hello_interval_modify(struct nb_cb_modify_args *args)
-{
-	struct ospf_if_params *params;
-	struct in_addr addr = { .s_addr = 0L };
-	struct interface *ifp;
-	uint16_t seconds;
-	bool configured;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_ERR_INCONSISTENCY;
-
-		params = IF_DEF_PARAMS(ifp);
-		configured = !lyd_is_default(args->dnode);
-		seconds = configured
-				  ? yang_dnode_get_uint16(args->dnode, NULL)
-				  : yang_get_default_uint16(
-					    FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-					    "/hello-interval");
-		lib_interface_ospf_set_hello_interval(params, seconds,
+	routing_ospf_vlink_timer_read(args->dnode, "hello-interval", &value,
+				      &configured);
+	if (ROUTING_OSPF_VLINK_PARAM_CHANGED(params, v_hello, value,
+					     configured)) {
+		lib_interface_ospf_set_hello_interval(params, value,
 						      configured);
-		ospf_reset_hello_timer(ifp, addr, false);
-		break;
+		hello_update = true;
 	}
 
-	return NB_OK;
-}
-
-
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_hello_interval_destroy(struct nb_cb_destroy_args *args)
-{
-	struct ospf_if_params *params;
-	struct in_addr addr = { .s_addr = 0L };
-	struct interface *ifp;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_OK;
-
-		params = IF_DEF_PARAMS(ifp);
-		lib_interface_ospf_set_hello_interval(
-			params,
-			yang_get_default_uint16(
-				FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-				"/hello-interval"),
-			false);
-		ospf_reset_hello_timer(ifp, addr, false);
-		break;
-	}
-
-	return NB_OK;
-}
-
-/*
- * XPath: /frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/retransmit-interval
- */
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_retransmit_interval_modify(struct nb_cb_modify_args *args)
-{
-	struct ospf_if_params *params;
-	struct interface *ifp;
-	uint16_t seconds;
-	bool configured;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_ERR_INCONSISTENCY;
-
-		params = IF_DEF_PARAMS(ifp);
-		configured = !lyd_is_default(args->dnode);
-		seconds = configured
-				  ? yang_dnode_get_uint16(args->dnode, NULL)
-				  : yang_get_default_uint16(
-					    FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-					    "/retransmit-interval");
-		lib_interface_ospf_set_retransmit_interval(params, seconds,
+	routing_ospf_vlink_timer_read(args->dnode, "retransmit-interval",
+				      &value, &configured);
+	if (ROUTING_OSPF_VLINK_PARAM_CHANGED(params, retransmit_interval,
+					     value, configured)) {
+		lib_interface_ospf_set_retransmit_interval(params, value,
 							   configured);
-		lib_interface_ospf_nbr_timer_update(ifp);
-		break;
+		nbr_timer_update = true;
 	}
 
-	return NB_OK;
-}
-
-
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_retransmit_interval_destroy(struct nb_cb_destroy_args *args)
-{
-	struct ospf_if_params *params;
-	struct interface *ifp;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_OK;
-
-		params = IF_DEF_PARAMS(ifp);
-		lib_interface_ospf_set_retransmit_interval(
-			params,
-			yang_get_default_uint16(
-				FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-				"/retransmit-interval"),
-			false);
-		lib_interface_ospf_nbr_timer_update(ifp);
-		break;
-	}
-
-	return NB_OK;
-}
-
-/*
- * XPath: /frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/retransmit-window
- */
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_retransmit_window_modify(struct nb_cb_modify_args *args)
-{
-	struct ospf_if_params *params;
-	struct interface *ifp;
-	uint16_t milliseconds;
-	bool configured;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_ERR_INCONSISTENCY;
-
-		params = IF_DEF_PARAMS(ifp);
-		configured = !lyd_is_default(args->dnode);
-		milliseconds =
-			configured ? yang_dnode_get_uint16(args->dnode, NULL)
-				   : yang_get_default_uint16(
-					     FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-					     "/retransmit-window");
-		lib_interface_ospf_set_retransmit_window(params, milliseconds,
+	routing_ospf_vlink_timer_read(args->dnode, "retransmit-window",
+				      &value, &configured);
+	if (ROUTING_OSPF_VLINK_PARAM_CHANGED(params, retransmit_window, value,
+					     configured))
+		lib_interface_ospf_set_retransmit_window(params, value,
 							 configured);
-		break;
-	}
 
-	return NB_OK;
-}
-
-
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_retransmit_window_destroy(struct nb_cb_destroy_args *args)
-{
-	struct ospf_if_params *params;
-	struct interface *ifp;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_OK;
-
-		params = IF_DEF_PARAMS(ifp);
-		lib_interface_ospf_set_retransmit_window(
-			params,
-			yang_get_default_uint16(
-				FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-				"/retransmit-window"),
-			false);
-		break;
-	}
-
-	return NB_OK;
-}
-
-/*
- * XPath: /frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/transmit-delay
- */
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_transmit_delay_modify(struct nb_cb_modify_args *args)
-{
-	struct ospf_if_params *params;
-	struct interface *ifp;
-	uint16_t seconds;
-	bool configured;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_ERR_INCONSISTENCY;
-
-		params = IF_DEF_PARAMS(ifp);
-		configured = !lyd_is_default(args->dnode);
-		seconds = configured
-				  ? yang_dnode_get_uint16(args->dnode, NULL)
-				  : yang_get_default_uint16(
-					    FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-					    "/transmit-delay");
-		lib_interface_ospf_set_transmit_delay(params, seconds,
+	routing_ospf_vlink_timer_read(args->dnode, "transmit-delay", &value,
+				      &configured);
+	if (ROUTING_OSPF_VLINK_PARAM_CHANGED(params, transmit_delay, value,
+					     configured))
+		lib_interface_ospf_set_transmit_delay(params, value,
 						      configured);
-		break;
-	}
 
-	return NB_OK;
+	if (nbr_timer_update)
+		lib_interface_ospf_nbr_timer_update(ifp);
+	if (hello_update)
+		ospf_reset_hello_timer(ifp, addr, false);
 }
 
-
-static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_transmit_delay_destroy(struct nb_cb_destroy_args *args)
-{
-	struct ospf_if_params *params;
-	struct interface *ifp;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = routing_ospf_area_virtual_link_ifp(
-			args->dnode, args->errmsg, args->errmsg_len);
-		if (!ifp || !lib_interface_ospf_ensure_if_info(ifp))
-			return NB_OK;
-
-		params = IF_DEF_PARAMS(ifp);
-		lib_interface_ospf_set_transmit_delay(
-			params,
-			yang_get_default_uint16(
-				FRR_OSPFD_AREA_VLINK_TIMERS_XPATH
-				"/transmit-delay"),
-			false);
-		break;
-	}
-
-	return NB_OK;
-}
+#undef ROUTING_OSPF_VLINK_PARAM_CHANGED
 
 /* clang-format off */
 const struct frr_yang_module_info frr_ospfd_nb_info = {
@@ -11968,38 +11720,44 @@ const struct frr_yang_module_info frr_ospfd_nb_info = {
 			}
 		},
 		{
+			.xpath = "/frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers",
+			.cbs = {
+				.apply_finish = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_apply_finish,
+			}
+		},
+		{
 			.xpath = "/frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/dead-interval",
 			.cbs = {
-				.modify = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_dead_interval_modify,
-				.destroy = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_dead_interval_destroy,
+				.modify = routing_ospf_modify_apply_finish,
+				.destroy = routing_ospf_destroy_apply_finish,
 			}
 		},
 		{
 			.xpath = "/frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/hello-interval",
 			.cbs = {
-				.modify = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_hello_interval_modify,
-				.destroy = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_hello_interval_destroy,
+				.modify = routing_ospf_modify_apply_finish,
+				.destroy = routing_ospf_destroy_apply_finish,
 			}
 		},
 		{
 			.xpath = "/frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/retransmit-interval",
 			.cbs = {
-				.modify = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_retransmit_interval_modify,
-				.destroy = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_retransmit_interval_destroy,
+				.modify = routing_ospf_modify_apply_finish,
+				.destroy = routing_ospf_destroy_apply_finish,
 			}
 		},
 		{
 			.xpath = "/frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/retransmit-window",
 			.cbs = {
-				.modify = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_retransmit_window_modify,
-				.destroy = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_retransmit_window_destroy,
+				.modify = routing_ospf_modify_apply_finish,
+				.destroy = routing_ospf_destroy_apply_finish,
 			}
 		},
 		{
 			.xpath = "/frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/virtual-link/timers/transmit-delay",
 			.cbs = {
-				.modify = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_transmit_delay_modify,
-				.destroy = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_link_timers_transmit_delay_destroy,
+				.modify = routing_ospf_modify_apply_finish,
+				.destroy = routing_ospf_destroy_apply_finish,
 			}
 		},
 		{
