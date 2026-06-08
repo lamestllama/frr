@@ -1112,49 +1112,6 @@ static void lib_interface_ospf_set_transmit_delay(struct ospf_if_params *params,
 	params->transmit_delay = seconds;
 }
 
-static void lib_interface_ospf_restore_hello_interval_path(struct interface *ifp,
-							   const char *xpath)
-{
-	struct ospf_if_params *params = IF_DEF_PARAMS(ifp);
-	struct in_addr addr = { .s_addr = 0L };
-
-	UNSET_IF_PARAM(params, v_hello);
-	params->v_hello = yang_get_default_uint16("%s", xpath);
-
-	if (!params->is_v_wait_set) {
-		UNSET_IF_PARAM(params, v_wait);
-		params->v_wait = 4 * params->v_hello;
-		lib_interface_ospf_nbr_timer_update(ifp);
-	}
-
-	ospf_reset_hello_timer(ifp, addr, false);
-}
-
-static void lib_interface_ospf_restore_hello_interval(struct interface *ifp)
-{
-	lib_interface_ospf_restore_hello_interval_path(
-		ifp, FRR_OSPFD_IFACE_XPATH "/hello-interval");
-}
-
-static void lib_interface_ospf_restore_dead_interval_path(struct interface *ifp,
-							  const char *xpath)
-{
-	struct ospf_if_params *params = IF_DEF_PARAMS(ifp);
-
-	UNSET_IF_PARAM(params, v_wait);
-	params->v_wait = yang_get_default_uint16("%s", xpath);
-	params->is_v_wait_set = false;
-	UNSET_IF_PARAM(params, fast_hello);
-	params->fast_hello = OSPF_FAST_HELLO_DEFAULT;
-	lib_interface_ospf_nbr_timer_update(ifp);
-}
-
-static void lib_interface_ospf_restore_dead_interval(struct interface *ifp)
-{
-	lib_interface_ospf_restore_dead_interval_path(
-		ifp, FRR_OSPFD_IFACE_XPATH "/dead-interval/interval");
-}
-
 static void lib_interface_ospf_priority_update(struct interface *ifp)
 {
 	struct route_node *rn;
@@ -1759,6 +1716,16 @@ static uint16_t routing_ospf_get_uint16_default(const struct lyd_node *dnode,
 		return yang_dnode_get_uint16(dnode, "%s", path);
 
 	return yang_get_default_uint16("%s", default_path);
+}
+
+static uint8_t routing_ospf_get_uint8_default(const struct lyd_node *dnode,
+					      const char *path,
+					      const char *default_path)
+{
+	if (yang_dnode_exists(dnode, path))
+		return yang_dnode_get_uint8(dnode, "%s", path);
+
+	return yang_get_default_uint8("%s", default_path);
 }
 
 static bool routing_ospf_get_bool_default(const struct lyd_node *dnode,
@@ -2791,64 +2758,151 @@ static int lib_interface_ospf_cost_destroy(struct nb_cb_destroy_args *args)
 /*
  * XPath: /frr-interface:lib/interface/frr-ospfd:ospf/dead-interval/interval
  */
-static int lib_interface_ospf_dead_interval_interval_modify(struct nb_cb_modify_args *args)
+static void lib_interface_ospf_uint16_default_read(const struct lyd_node *dnode,
+						   const char *path,
+						   const char *default_path,
+						   uint16_t *value,
+						   bool *configured)
+{
+	struct lyd_node *leaf;
+
+	leaf = yang_dnode_get(dnode, path);
+	*configured = leaf && !lyd_is_default(leaf);
+	*value = leaf ? yang_dnode_get_uint16(leaf, NULL)
+		      : yang_get_default_uint16("%s", default_path);
+}
+
+static void lib_interface_ospf_fast_hello_set(struct ospf_if_params *params,
+					      uint8_t multiplier,
+					      bool configured)
+{
+	if (configured)
+		SET_IF_PARAM(params, fast_hello);
+	else
+		UNSET_IF_PARAM(params, fast_hello);
+
+	params->fast_hello = multiplier;
+}
+
+static void lib_interface_ospf_timers_apply_finish(struct nb_cb_apply_finish_args *args)
 {
 	struct interface *ifp;
 	struct ospf_if_params *params;
 	struct in_addr addr = { .s_addr = 0L };
-	bool had_fast_hello;
+	const struct lyd_node *minimal;
+	uint16_t retransmit_interval;
+	uint16_t retransmit_window;
+	uint16_t transmit_delay;
+	uint16_t hello_interval;
+	uint16_t dead_interval;
+	bool retransmit_interval_configured;
+	bool retransmit_window_configured;
+	bool transmit_delay_configured;
+	bool hello_configured;
+	bool dead_configured;
+	bool wait_configured;
+	bool fast_configured;
+	bool wait_explicit;
+	uint8_t fast_hello;
+	bool nbr_update;
+	bool hello_update;
 
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = lib_interface_ospf_get_ifp(args->dnode);
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
+	ifp = lib_interface_ospf_get_ifp(args->dnode);
+	params = lib_interface_ospf_get_params(args->dnode);
+	if (!params)
+		return;
 
-		if (lyd_is_default(args->dnode)) {
-			lib_interface_ospf_restore_dead_interval(ifp);
-			return NB_OK;
+	lib_interface_ospf_uint16_default_read(
+		args->dnode, "hello-interval",
+		FRR_OSPFD_IFACE_XPATH "/hello-interval", &hello_interval,
+		&hello_configured);
+	minimal = yang_dnode_get(args->dnode, "dead-interval/minimal");
+	if (minimal) {
+		fast_configured = true;
+		fast_hello = yang_dnode_get_uint8(minimal, "hello-multiplier");
+		dead_interval = OSPF_ROUTER_DEAD_INTERVAL_MINIMAL;
+		wait_configured = true;
+		wait_explicit = true;
+	} else {
+		lib_interface_ospf_uint16_default_read(
+			args->dnode, "dead-interval/interval",
+			FRR_OSPFD_IFACE_XPATH "/dead-interval/interval",
+			&dead_interval, &dead_configured);
+		fast_configured = false;
+		fast_hello = OSPF_FAST_HELLO_DEFAULT;
+		if (dead_configured) {
+			wait_configured = true;
+			wait_explicit = true;
+		} else if (hello_configured) {
+			dead_interval = 4 * hello_interval;
+			wait_configured = true;
+			wait_explicit = false;
+		} else {
+			wait_configured = false;
+			wait_explicit = false;
 		}
-
-		had_fast_hello = params->fast_hello != OSPF_FAST_HELLO_DEFAULT;
-		UNSET_IF_PARAM(params, fast_hello);
-		params->fast_hello = OSPF_FAST_HELLO_DEFAULT;
-		SET_IF_PARAM(params, v_wait);
-		params->v_wait = yang_dnode_get_uint16(args->dnode, NULL);
-		params->is_v_wait_set = true;
-		lib_interface_ospf_nbr_timer_update(ifp);
-		if (had_fast_hello)
-			ospf_reset_hello_timer(ifp, addr, false);
-		break;
 	}
 
-	return NB_OK;
+	nbr_update =
+		OSPF_IF_PARAM_CONFIGURED(params, v_wait) != wait_configured ||
+		params->v_wait != dead_interval ||
+		params->is_v_wait_set != wait_explicit ||
+		OSPF_IF_PARAM_CONFIGURED(params, fast_hello) !=
+			fast_configured ||
+		params->fast_hello != fast_hello;
+	hello_update =
+		OSPF_IF_PARAM_CONFIGURED(params, v_hello) != hello_configured ||
+		params->v_hello != hello_interval ||
+		OSPF_IF_PARAM_CONFIGURED(params, fast_hello) !=
+			fast_configured ||
+		params->fast_hello != fast_hello;
+
+	lib_interface_ospf_set_hello_interval(params, hello_interval,
+					      hello_configured);
+	lib_interface_ospf_set_dead_interval(params, dead_interval,
+					     wait_configured);
+	params->is_v_wait_set = wait_explicit;
+	lib_interface_ospf_fast_hello_set(params, fast_hello,
+					  fast_configured);
+
+	lib_interface_ospf_uint16_default_read(
+		args->dnode, "retransmit-interval",
+		FRR_OSPFD_IFACE_XPATH "/retransmit-interval",
+		&retransmit_interval, &retransmit_interval_configured);
+	lib_interface_ospf_set_retransmit_interval(
+		params, retransmit_interval, retransmit_interval_configured);
+
+	lib_interface_ospf_uint16_default_read(
+		args->dnode, "retransmit-window",
+		FRR_OSPFD_IFACE_XPATH "/retransmit-window",
+		&retransmit_window, &retransmit_window_configured);
+	lib_interface_ospf_set_retransmit_window(
+		params, retransmit_window, retransmit_window_configured);
+
+	lib_interface_ospf_uint16_default_read(
+		args->dnode, "transmit-delay",
+		FRR_OSPFD_IFACE_XPATH "/transmit-delay", &transmit_delay,
+		&transmit_delay_configured);
+	lib_interface_ospf_set_transmit_delay(params, transmit_delay,
+					      transmit_delay_configured);
+
+	if (nbr_update)
+		lib_interface_ospf_nbr_timer_update(ifp);
+	if (hello_update)
+		ospf_reset_hello_timer(ifp, addr, false);
 }
 
+/*
+ * XPath: /frr-interface:lib/interface/frr-ospfd:ospf/dead-interval/interval
+ */
+static int lib_interface_ospf_dead_interval_interval_modify(struct nb_cb_modify_args *args)
+{
+	return routing_ospf_modify_apply_finish(args);
+}
 
 static int lib_interface_ospf_dead_interval_interval_destroy(struct nb_cb_destroy_args *args)
 {
-	struct interface *ifp;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = lib_interface_ospf_get_ifp(args->dnode);
-		if (!lib_interface_ospf_ensure_if_info(ifp))
-			return NB_OK;
-
-		lib_interface_ospf_restore_dead_interval(ifp);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -2856,55 +2910,12 @@ static int lib_interface_ospf_dead_interval_interval_destroy(struct nb_cb_destro
  */
 static int lib_interface_ospf_dead_interval_minimal_create(struct nb_cb_create_args *args)
 {
-	struct interface *ifp;
-	struct ospf_if_params *params;
-	struct in_addr addr = { .s_addr = 0L };
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = lib_interface_ospf_get_ifp(args->dnode);
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		SET_IF_PARAM(params, fast_hello);
-		params->fast_hello =
-			yang_dnode_get_uint8(args->dnode, "hello-multiplier");
-		SET_IF_PARAM(params, v_wait);
-		params->v_wait = OSPF_ROUTER_DEAD_INTERVAL_MINIMAL;
-		params->is_v_wait_set = true;
-		lib_interface_ospf_nbr_timer_update(ifp);
-		ospf_reset_hello_timer(ifp, addr, false);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_create_apply_finish(args);
 }
-
 
 static int lib_interface_ospf_dead_interval_minimal_destroy(struct nb_cb_destroy_args *args)
 {
-	struct interface *ifp;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = lib_interface_ospf_get_ifp(args->dnode);
-		if (!lib_interface_ospf_ensure_if_info(ifp))
-			return NB_OK;
-
-		lib_interface_ospf_restore_dead_interval(ifp);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -2912,101 +2923,20 @@ static int lib_interface_ospf_dead_interval_minimal_destroy(struct nb_cb_destroy
  */
 static int lib_interface_ospf_dead_interval_minimal_hello_multiplier_modify(struct nb_cb_modify_args *args)
 {
-	struct interface *ifp;
-	struct ospf_if_params *params;
-	struct in_addr addr = { .s_addr = 0L };
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = lib_interface_ospf_get_ifp(args->dnode);
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		SET_IF_PARAM(params, fast_hello);
-		params->fast_hello = yang_dnode_get_uint8(args->dnode, NULL);
-		SET_IF_PARAM(params, v_wait);
-		params->v_wait = OSPF_ROUTER_DEAD_INTERVAL_MINIMAL;
-		params->is_v_wait_set = true;
-		lib_interface_ospf_nbr_timer_update(ifp);
-		ospf_reset_hello_timer(ifp, addr, false);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
-
 
 /*
  * XPath: /frr-interface:lib/interface/frr-ospfd:ospf/hello-interval
  */
 static int lib_interface_ospf_hello_interval_modify(struct nb_cb_modify_args *args)
 {
-	struct interface *ifp;
-	struct ospf_if_params *params;
-	struct in_addr addr = { .s_addr = 0L };
-	uint16_t seconds;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = lib_interface_ospf_get_ifp(args->dnode);
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		if (lyd_is_default(args->dnode)) {
-			lib_interface_ospf_restore_hello_interval(ifp);
-			return NB_OK;
-		}
-
-		seconds = yang_dnode_get_uint16(args->dnode, NULL);
-		if (params->v_hello == seconds)
-			return NB_OK;
-
-		SET_IF_PARAM(params, v_hello);
-		params->v_hello = seconds;
-
-		if (!params->is_v_wait_set) {
-			SET_IF_PARAM(params, v_wait);
-			params->v_wait = 4 * seconds;
-			lib_interface_ospf_nbr_timer_update(ifp);
-		}
-
-		ospf_reset_hello_timer(ifp, addr, false);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
-
 
 static int lib_interface_ospf_hello_interval_destroy(struct nb_cb_destroy_args *args)
 {
-	struct interface *ifp;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ifp = lib_interface_ospf_get_ifp(args->dnode);
-		if (!lib_interface_ospf_ensure_if_info(ifp))
-			return NB_OK;
-
-		lib_interface_ospf_restore_hello_interval(ifp);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -3014,51 +2944,12 @@ static int lib_interface_ospf_hello_interval_destroy(struct nb_cb_destroy_args *
  */
 static int lib_interface_ospf_retransmit_interval_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_if_params *params;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		lib_interface_ospf_set_retransmit_interval(
-			params, yang_dnode_get_uint16(args->dnode, NULL),
-			!lyd_is_default(args->dnode));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
-
 
 static int lib_interface_ospf_retransmit_interval_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf_if_params *params;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		lib_interface_ospf_set_retransmit_interval(
-			params,
-			yang_get_default_uint16(FRR_OSPFD_IFACE_XPATH
-						"/retransmit-interval"),
-			false);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -3066,51 +2957,12 @@ static int lib_interface_ospf_retransmit_interval_destroy(struct nb_cb_destroy_a
  */
 static int lib_interface_ospf_retransmit_window_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_if_params *params;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		lib_interface_ospf_set_retransmit_window(
-			params, yang_dnode_get_uint16(args->dnode, NULL),
-			!lyd_is_default(args->dnode));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
-
 
 static int lib_interface_ospf_retransmit_window_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf_if_params *params;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		lib_interface_ospf_set_retransmit_window(
-			params,
-			yang_get_default_uint16(FRR_OSPFD_IFACE_XPATH
-						"/retransmit-window"),
-			false);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -3118,51 +2970,12 @@ static int lib_interface_ospf_retransmit_window_destroy(struct nb_cb_destroy_arg
  */
 static int lib_interface_ospf_transmit_delay_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_if_params *params;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		lib_interface_ospf_set_transmit_delay(
-			params, yang_dnode_get_uint16(args->dnode, NULL),
-			!lyd_is_default(args->dnode));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
-
 
 static int lib_interface_ospf_transmit_delay_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf_if_params *params;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		params = lib_interface_ospf_get_params(args->dnode);
-		if (!params)
-			return NB_OK;
-
-		lib_interface_ospf_set_transmit_delay(
-			params,
-			yang_get_default_uint16(FRR_OSPFD_IFACE_XPATH
-						"/transmit-delay"),
-			false);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -10269,6 +10082,12 @@ routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_virtual_l
 const struct frr_yang_module_info frr_ospfd_nb_info = {
 	.name = "frr-ospfd",
 	.nodes = {
+		{
+			.xpath = "/frr-interface:lib/interface/frr-ospfd:ospf",
+			.cbs = {
+				.apply_finish = lib_interface_ospf_timers_apply_finish,
+			}
+		},
 		{
 			.xpath = "/frr-interface:lib/interface/frr-ospfd:ospf/dscp/all",
 			.cbs = {
