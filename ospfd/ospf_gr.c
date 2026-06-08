@@ -301,6 +301,28 @@ void ospf_gr_restart_enter(struct ospf *ospf,
 			remaining_time, &ospf->gr_info.t_grace_period);
 }
 
+void ospf_gr_shutdown_enter(struct ospf *ospf)
+{
+	struct listnode *node, *inode;
+	struct ospf_area *area;
+	struct ospf_interface *oi;
+
+	if (!ospf->gr_info.restart_support)
+		return;
+
+	/* Reenable routing instance in GR mode. */
+	ospf_gr_restart_enter(ospf, OSPF_GR_SWITCH_CONTROL_PROCESSOR,
+			      time(NULL) + ospf->gr_info.grace_period);
+
+	/*
+	 * RFC 3623, section 5, sends grace-LSAs out every interface for an
+	 * unplanned outage, even before previous adjacencies are known.
+	 */
+	for (ALL_LIST_ELEMENTS_RO(ospf->areas, node, area))
+		for (ALL_LIST_ELEMENTS_RO(area->oiflist, inode, oi))
+			ospf_gr_unplanned_start_interface(oi);
+}
+
 /* Check if a Router-LSA contains a given link. */
 static bool ospf_router_lsa_contains_adj(struct ospf_lsa *lsa,
 					 struct in_addr *id)
@@ -574,7 +596,7 @@ void ospf_gr_iface_send_grace_lsa(struct event *event)
  * Record in non-volatile memory that the given OSPF instance is attempting to
  * perform a graceful restart.
  */
-static void ospf_gr_nvm_update(struct ospf *ospf, bool prepare)
+void ospf_gr_nvm_update(struct ospf *ospf, bool prepare)
 {
 	const char *inst_name;
 	json_object *json;
@@ -612,6 +634,41 @@ static void ospf_gr_nvm_update(struct ospf *ospf, bool prepare)
 				    time(NULL) + ospf->gr_info.grace_period);
 
 	frr_daemon_state_save(&json);
+}
+
+void ospf_gr_restart_support_enable(struct ospf *ospf)
+{
+	if (ospf->gr_info.grace_period == 0)
+		ospf->gr_info.grace_period = OSPF_DFLT_GRACE_INTERVAL;
+
+	ospf->gr_info.restart_support = true;
+	(void)ospf_zebra_gr_enable(ospf, ospf->gr_info.grace_period);
+	ospf_gr_nvm_update(ospf, false);
+}
+
+int ospf_gr_restart_support_disable(struct ospf *ospf)
+{
+	if (!ospf->gr_info.restart_support)
+		return 0;
+
+	if (ospf->gr_info.prepare_in_progress)
+		return -1;
+
+	ospf->gr_info.restart_support = false;
+	ospf_gr_nvm_delete(ospf);
+	ospf_zebra_gr_disable(ospf);
+
+	return 0;
+}
+
+void ospf_gr_set_grace_period(struct ospf *ospf, uint32_t grace_period)
+{
+	if (ospf->gr_info.grace_period == grace_period)
+		return;
+
+	ospf->gr_info.grace_period = grace_period;
+	if (ospf->gr_info.restart_support)
+		(void)ospf_zebra_gr_enable(ospf, grace_period);
 }
 
 /*
@@ -800,14 +857,8 @@ DEFPY(graceful_restart, graceful_restart_cmd,
 	if (!grace_period_str)
 		grace_period = OSPF_DFLT_GRACE_INTERVAL;
 
-	ospf->gr_info.restart_support = true;
 	ospf->gr_info.grace_period = grace_period;
-
-	/* Freeze OSPF routes in the RIB. */
-	(void)ospf_zebra_gr_enable(ospf, ospf->gr_info.grace_period);
-
-	/* Record that GR is enabled in non-volatile memory. */
-	ospf_gr_nvm_update(ospf, false);
+	ospf_gr_restart_support_enable(ospf);
 
 	return CMD_SUCCESS;
 }
@@ -829,10 +880,8 @@ DEFPY(no_graceful_restart, no_graceful_restart_cmd,
 		return CMD_WARNING;
 	}
 
-	ospf->gr_info.restart_support = false;
+	ospf_gr_restart_support_disable(ospf);
 	ospf->gr_info.grace_period = OSPF_DFLT_GRACE_INTERVAL;
-	ospf_gr_nvm_delete(ospf);
-	ospf_zebra_gr_disable(ospf);
 
 	return CMD_SUCCESS;
 }

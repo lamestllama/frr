@@ -363,13 +363,16 @@ static void ospf_bfd_if_prune_nonquick(struct ospf_interface *oi)
 	}
 }
 
-static void ospf_interface_bfd_apply(struct interface *ifp)
+void ospf_interface_bfd_apply(struct interface *ifp)
 {
 	struct ospf_interface *oi;
 	struct route_table *nbrs;
 	struct ospf_neighbor *nbr;
 	struct route_node *irn;
 	struct route_node *nrn;
+
+	if (!IF_OIFS(ifp))
+		return;
 
 	/* Iterate over all interfaces and set neighbors BFD session. */
 	for (irn = route_top(IF_OIFS(ifp)); irn; irn = route_next(irn)) {
@@ -386,10 +389,9 @@ static void ospf_interface_bfd_apply(struct interface *ifp)
 	}
 }
 
-static void ospf_interface_enable_bfd(struct interface *ifp, bool quick)
+struct bfd_configuration *ospf_interface_bfd_config_get(struct interface *ifp)
 {
 	struct ospf_if_params *oip = IF_DEF_PARAMS(ifp);
-	bool old_quick = false;
 
 	if (!oip->bfd_config) {
 		/* Allocate memory for configurations and set defaults. */
@@ -397,8 +399,19 @@ static void ospf_interface_enable_bfd(struct interface *ifp, bool quick)
 		oip->bfd_config->detection_multiplier = BFD_DEF_DETECT_MULT;
 		oip->bfd_config->min_rx = BFD_DEF_MIN_RX;
 		oip->bfd_config->min_tx = BFD_DEF_MIN_TX;
-	} else
+	}
+
+	return oip->bfd_config;
+}
+
+void ospf_interface_enable_bfd(struct interface *ifp, bool quick)
+{
+	struct ospf_if_params *oip = IF_DEF_PARAMS(ifp);
+	bool old_quick = false;
+
+	if (oip->bfd_config)
 		old_quick = oip->bfd_config->quick;
+	ospf_interface_bfd_config_get(ifp);
 
 	oip->bfd_config->quick = quick;
 
@@ -407,6 +420,9 @@ static void ospf_interface_enable_bfd(struct interface *ifp, bool quick)
 	 */
 	if (old_quick && !quick) {
 		struct route_node *rn;
+
+		if (!IF_OIFS(ifp))
+			return;
 
 		for (rn = route_top(IF_OIFS(ifp)); rn; rn = route_next(rn)) {
 			struct ospf_interface *oi = rn->info;
@@ -427,6 +443,9 @@ void ospf_interface_disable_bfd(struct interface *ifp,
 	XFREE(MTYPE_BFD_CONFIG, oip->bfd_config);
 	ospf_interface_bfd_apply(ifp);
 	/* Ensure any interface-owned entries are removed too. */
+	if (!IF_OIFS(ifp))
+		return;
+
 	{
 		struct route_node *rn;
 

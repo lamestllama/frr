@@ -6,6 +6,8 @@
 #ifndef _QUAGGA_OSPF_VTY_H
 #define _QUAGGA_OSPF_VTY_H
 
+#include "json.h"
+
 /* Macros. */
 #define VTY_GET_OSPF_AREA_ID(V, F, STR)                                        \
 	{                                                                      \
@@ -34,10 +36,15 @@
 	}
 
 /* Prototypes. */
+struct ospf_if_params;
+
 extern void ospf_vty_init(void);
 extern void ospf_vty_show_init(void);
 extern void ospf_vty_clear_init(void);
 extern int str2area_id(const char *str, struct in_addr *area_id, int *area_id_fmt);
+extern void ospf_passive_interface_update(struct interface *ifp,
+					  struct ospf_if_params *params,
+					  struct in_addr addr, uint8_t newval);
 
 /* unit tests */
 void show_ip_ospf_database_summary(struct vty *vty, struct ospf *ospf, int self,

@@ -29,6 +29,7 @@
 #include "routemap.h"
 #include "keychain.h"
 #include "libagentx.h"
+#include "routing_nb.h"
 
 #include "ospfd/ospfd.h"
 #include "ospfd/ospf_interface.h"
@@ -44,6 +45,7 @@
 #include "ospfd/ospf_gr.h"
 #include "ospfd/ospf_errors.h"
 #include "ospfd/ospf_ldp_sync.h"
+#include "ospfd/ospf_nb.h"
 #include "ospfd/ospf_routemap_nb.h"
 #include "ospfd/ospf_apiserver.h"
 
@@ -138,6 +140,8 @@ static const struct frr_yang_module_info *const ospfd_yang_modules[] = {
 	&frr_interface_info,
 	&frr_route_map_info,
 	&frr_vrf_info,
+	&frr_routing_info,
+	&frr_ospfd_nb_info,
 	&frr_ospf_route_map_info,
 	&ietf_key_chain_info,
 	&ietf_key_chain_deviation_info,
@@ -299,6 +303,13 @@ int main(int argc, char **argv)
 	ospf_opaque_init();
 	ospf_gr_init();
 	ospf_gr_helper_init();
+
+	hook_register(routing_conf_event,
+		      routing_control_plane_protocols_ospfd_validate);
+	hook_register(routing_create,
+		      routing_control_plane_protocols_ospfd_create);
+	hook_register(routing_destroy,
+		      routing_control_plane_protocols_ospfd_destroy);
 
 	/* OSPF errors init */
 	ospf_error_init();

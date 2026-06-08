@@ -1875,6 +1875,162 @@ static int ospf_ri_enabled(struct vty *vty)
 	return 0;
 }
 
+int ospf_router_info_set(struct ospf *ospf, uint8_t scope, char *errmsg,
+			 size_t errmsg_len)
+{
+	if (OspfRI.enabled)
+		return 0;
+
+	if (ospf->vrf_id != VRF_DEFAULT) {
+		snprintf(errmsg, errmsg_len,
+			 "Router Information is only supported in default VRF");
+		return -1;
+	}
+
+	if (!OspfRI.registered && ospf_router_info_register(scope) != 0) {
+		snprintf(errmsg, errmsg_len,
+			 "Unable to register Router Information callbacks");
+		flog_err(
+			EC_OSPF_INIT_FAIL,
+			"RI (%s): Unable to register Router Information callbacks. Abort!",
+			__func__);
+		return -1;
+	}
+
+	OspfRI.enabled = true;
+
+	if (IS_DEBUG_OSPF_EVENT)
+		zlog_debug("RI-> Router Information (%s flooding): OFF -> ON",
+			   OspfRI.scope == OSPF_OPAQUE_AREA_LSA ? "Area" : "AS");
+
+	initialize_params(&OspfRI);
+	ospf_router_info_schedule(REORIGINATE_THIS_LSA);
+	return 0;
+}
+
+void ospf_router_info_unset(void)
+{
+	if (!OspfRI.enabled)
+		return;
+
+	if (IS_DEBUG_OSPF_EVENT)
+		zlog_debug("RI-> Router Information: ON -> OFF");
+
+	ospf_router_info_schedule(FLUSH_THIS_LSA);
+	OspfRI.enabled = false;
+}
+
+void ospf_pce_address_set(struct in_addr address)
+{
+	struct ospf_pce_info *pce = &OspfRI.pce_info;
+
+	if (ntohs(pce->pce_address.header.type) != 0 &&
+	    ntohl(pce->pce_address.address.value.s_addr) ==
+		    ntohl(address.s_addr))
+		return;
+
+	set_pce_address(address, pce);
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+}
+
+void ospf_pce_address_unset(void)
+{
+	unset_param(&OspfRI.pce_info.pce_address);
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+}
+
+void ospf_pce_scope_set(uint32_t scope)
+{
+	struct ospf_pce_info *pce = &OspfRI.pce_info;
+
+	if (ntohs(pce->pce_scope.header.type) != 0 &&
+	    ntohl(pce->pce_scope.value) == scope)
+		return;
+
+	set_pce_path_scope(scope, pce);
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+}
+
+void ospf_pce_scope_unset(void)
+{
+	unset_param(&OspfRI.pce_info.pce_scope);
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+}
+
+struct ri_pce_subtlv_domain *ospf_pce_domain_as_set(uint32_t as)
+{
+	struct ospf_pce_info *pce = &OspfRI.pce_info;
+	struct ri_pce_subtlv_domain *domain;
+	struct listnode *node;
+
+	for (ALL_LIST_ELEMENTS_RO(pce->pce_domain, node, domain))
+		if (ntohs(domain->header.type) != 0 &&
+		    ntohs(domain->type) == PCE_DOMAIN_TYPE_AS &&
+		    ntohl(domain->value) == as)
+			return domain;
+
+	set_pce_domain(PCE_DOMAIN_TYPE_AS, as, pce);
+	domain = listgetdata(listtail(pce->pce_domain));
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+	return domain;
+}
+
+void ospf_pce_domain_as_unset(struct ri_pce_subtlv_domain *domain)
+{
+	if (!domain)
+		return;
+
+	listnode_delete(OspfRI.pce_info.pce_domain, domain);
+	XFREE(MTYPE_OSPF_ROUTER_INFO, domain);
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+}
+
+struct ri_pce_subtlv_neighbor *ospf_pce_neighbor_as_set(uint32_t as)
+{
+	struct ospf_pce_info *pce = &OspfRI.pce_info;
+	struct ri_pce_subtlv_neighbor *neighbor;
+	struct listnode *node;
+
+	for (ALL_LIST_ELEMENTS_RO(pce->pce_neighbor, node, neighbor))
+		if (ntohs(neighbor->header.type) != 0 &&
+		    ntohs(neighbor->type) == PCE_DOMAIN_TYPE_AS &&
+		    ntohl(neighbor->value) == as)
+			return neighbor;
+
+	set_pce_neighbor(PCE_DOMAIN_TYPE_AS, as, pce);
+	neighbor = listgetdata(listtail(pce->pce_neighbor));
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+	return neighbor;
+}
+
+void ospf_pce_neighbor_as_unset(struct ri_pce_subtlv_neighbor *neighbor)
+{
+	if (!neighbor)
+		return;
+
+	listnode_delete(OspfRI.pce_info.pce_neighbor, neighbor);
+	XFREE(MTYPE_OSPF_ROUTER_INFO, neighbor);
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+}
+
+void ospf_pce_flag_set(uint32_t flag)
+{
+	struct ospf_pce_info *pce = &OspfRI.pce_info;
+
+	if (ntohs(pce->pce_cap_flag.header.type) != 0 &&
+	    ntohl(pce->pce_cap_flag.value) == flag)
+		return;
+
+	set_pce_cap_flag(flag, pce);
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+}
+
+void ospf_pce_flag_unset(void)
+{
+	unset_param(&OspfRI.pce_info.pce_cap_flag);
+	ospf_router_info_schedule(REFRESH_THIS_LSA);
+}
+
 DEFUN (pce_address,
        pce_address_cmd,
        "pce address A.B.C.D",

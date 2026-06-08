@@ -68,6 +68,23 @@ int ospf_interface_neighbor_count(struct ospf_interface *oi)
 	return count;
 }
 
+void ospf_nbr_timer_update(struct ospf_interface *oi)
+{
+	struct route_node *rn;
+	struct ospf_neighbor *nbr;
+
+	for (rn = route_top(oi->nbrs); rn; rn = route_next(rn)) {
+		nbr = rn->info;
+
+		if (!nbr)
+			continue;
+
+		nbr->v_inactivity = OSPF_IF_PARAM(oi, v_wait);
+		nbr->v_db_desc = OSPF_IF_PARAM(oi, retransmit_interval);
+		nbr->v_ls_req = OSPF_IF_PARAM(oi, retransmit_interval);
+		nbr->v_ls_rxmt = OSPF_IF_PARAM(oi, retransmit_interval);
+	}
+}
 
 void ospf_intf_neighbor_filter_apply(struct ospf_interface *oi)
 {
@@ -626,17 +643,25 @@ void ospf_free_if_params(struct interface *ifp, struct in_addr addr)
 	    !OSPF_IF_PARAM_CONFIGURED(oip, retransmit_interval) &&
 	    !OSPF_IF_PARAM_CONFIGURED(oip, retransmit_window) &&
 	    !OSPF_IF_PARAM_CONFIGURED(oip, passive_interface) &&
-	    !OSPF_IF_PARAM_CONFIGURED(oip, v_hello) && !OSPF_IF_PARAM_CONFIGURED(oip, fast_hello) &&
-	    !OSPF_IF_PARAM_CONFIGURED(oip, v_wait) && !OSPF_IF_PARAM_CONFIGURED(oip, priority) &&
-	    !OSPF_IF_PARAM_CONFIGURED(oip, type) && !OSPF_IF_PARAM_CONFIGURED(oip, auth_simple) &&
-	    !OSPF_IF_PARAM_CONFIGURED(oip, auth_type) && !OSPF_IF_PARAM_CONFIGURED(oip, if_area) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, v_hello) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, fast_hello) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, v_gr_hello_delay) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, v_wait) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, priority) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, type) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, auth_simple) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, auth_type) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, if_area) &&
+	    !OSPF_IF_PARAM_CONFIGURED(oip, mtu_ignore) &&
 	    !OSPF_IF_PARAM_CONFIGURED(oip, opaque_capable) &&
 	    !OSPF_IF_PARAM_CONFIGURED(oip, prefix_suppression) &&
 	    !OSPF_IF_PARAM_CONFIGURED(oip, keychain_name) &&
 	    !OSPF_IF_PARAM_CONFIGURED(oip, nbr_filter_name) &&
 	    !OSPF_IF_PARAM_CONFIGURED(oip, dead_timer_any) &&
 	    !OSPF_IF_PARAM_CONFIGURED(oip, dscp_ospf_all) &&
-	    !OSPF_IF_PARAM_CONFIGURED(oip, dscp_low_control) && listcount(oip->auth_crypt) == 0) {
+	    !OSPF_IF_PARAM_CONFIGURED(oip, dscp_low_control) &&
+	    !oip->bfd_config && !oip->ldp_sync_info &&
+	    listcount(oip->auth_crypt) == 0) {
 		ospf_del_if_params(ifp, oip);
 		rn->info = NULL;
 		route_unlock_node(rn);

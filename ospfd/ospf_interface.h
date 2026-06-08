@@ -57,6 +57,7 @@ struct ospf_if_params {
 	DECLARE_IF_PARAM(uint8_t, priority); /* OSPF Interface priority */
 	/* Enable OSPF on this interface with area if_area */
 	DECLARE_IF_PARAM(struct in_addr, if_area);
+	uint16_t if_ospf_instance;
 	uint32_t if_area_id_fmt;
 
 	bool type_cfg;
@@ -389,6 +390,7 @@ extern void ospf_crypt_key_add(struct list *list, struct crypt_key *key);
 extern int ospf_crypt_key_delete(struct list *list, uint8_t key_id);
 extern uint8_t ospf_default_iftype(struct interface *ifp);
 extern int ospf_interface_neighbor_count(struct ospf_interface *oi);
+extern void ospf_nbr_timer_update(struct ospf_interface *oi);
 extern void ospf_intf_neighbor_filter_apply(struct ospf_interface *oi);
 
 /* Set all multicast memberships appropriately based on the type and

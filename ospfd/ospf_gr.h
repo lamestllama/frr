@@ -170,12 +170,17 @@ extern void ospf_gr_iface_send_grace_lsa(struct event *event);
 extern void ospf_gr_restart_enter(struct ospf *ospf,
 				  enum ospf_gr_restart_reason reason,
 				  time_t timestamp);
+extern void ospf_gr_shutdown_enter(struct ospf *ospf);
 extern void ospf_gr_check_lsdb_consistency(struct ospf *ospf,
 						  struct ospf_area *area);
 extern void ospf_gr_check_adjs(struct ospf *ospf);
 extern void ospf_gr_nvm_read(struct ospf *ospf);
+extern void ospf_gr_nvm_update(struct ospf *ospf, bool prepare);
 extern void ospf_gr_nvm_delete(struct ospf *ospf);
 extern void ospf_gr_unplanned_start_interface(struct ospf_interface *oi);
+extern void ospf_gr_restart_support_enable(struct ospf *ospf);
+extern int ospf_gr_restart_support_disable(struct ospf *ospf);
+extern void ospf_gr_set_grace_period(struct ospf *ospf, uint32_t grace_period);
 extern void ospf_gr_init(void);
 
 #endif /* _ZEBRA_OSPF_GR_H */

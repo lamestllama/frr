@@ -992,6 +992,12 @@ static void ospf_area_free(struct ospf_area *area)
 	if (IMPORT_NAME(area))
 		free(IMPORT_NAME(area));
 
+	if (PREFIX_NAME_IN(area))
+		free(PREFIX_NAME_IN(area));
+
+	if (PREFIX_NAME_OUT(area))
+		free(PREFIX_NAME_OUT(area));
+
 	/* Cancel timer. */
 	event_cancel(&area->t_stub_router);
 	event_cancel(&area->t_opaque_lsa_self);
@@ -1014,6 +1020,8 @@ void ospf_area_check_free(struct ospf *ospf, struct in_addr area_id)
 	    area->external_routing == OSPF_AREA_DEFAULT &&
 	    area->no_summary == 0 && area->default_cost == 1 &&
 	    EXPORT_NAME(area) == NULL && IMPORT_NAME(area) == NULL &&
+	    PREFIX_NAME_IN(area) == NULL && PREFIX_NAME_OUT(area) == NULL &&
+	    !area->fr_info.configured &&
 	    area->auth_type == OSPF_AUTH_NULL) {
 		listnode_delete(ospf->areas, area);
 		ospf_area_free(area);

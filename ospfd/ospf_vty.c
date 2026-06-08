@@ -359,9 +359,9 @@ static void ospf_passive_interface_default_update(struct ospf *ospf,
 		ospf_if_set_multicast(oi);
 }
 
-static void ospf_passive_interface_update(struct interface *ifp,
-					  struct ospf_if_params *params,
-					  struct in_addr addr, uint8_t newval)
+void ospf_passive_interface_update(struct interface *ifp,
+				   struct ospf_if_params *params,
+				   struct in_addr addr, uint8_t newval)
 {
 	struct route_node *rn;
 
@@ -8144,24 +8144,6 @@ DEFUN_HIDDEN (no_ospf_cost,
 	return no_ip_ospf_cost(self, vty, argc, argv);
 }
 
-static void ospf_nbr_timer_update(struct ospf_interface *oi)
-{
-	struct route_node *rn;
-	struct ospf_neighbor *nbr;
-
-	for (rn = route_top(oi->nbrs); rn; rn = route_next(rn)) {
-		nbr = rn->info;
-
-		if (!nbr)
-			continue;
-
-		nbr->v_inactivity = OSPF_IF_PARAM(oi, v_wait);
-		nbr->v_db_desc = OSPF_IF_PARAM(oi, retransmit_interval);
-		nbr->v_ls_req = OSPF_IF_PARAM(oi, retransmit_interval);
-		nbr->v_ls_rxmt = OSPF_IF_PARAM(oi, retransmit_interval);
-	}
-}
-
 static int ospf_vty_dead_interval_set(struct vty *vty, const char *interval_str,
 				      const char *nbr_str,
 				      const char *fast_hello_str)
@@ -13812,10 +13794,6 @@ DEFPY(ospf_instance_shutdown, ospf_instance_shutdown_cmd,
 	VTY_DECLVAR_INSTANCE_CONTEXT(ospf, ospf);
 
 	if (!no && ospf->gr_info.restart_support) {
-		struct listnode *node, *inode;
-		struct ospf_interface *oi;
-		struct ospf_area *area;
-
 		/* Prevent OSPF shutdown with graceful restart if opaque is disabled */
 		if (!CHECK_FLAG(ospf->config, OSPF_OPAQUE_CAPABLE)) {
 			vty_out(vty,
@@ -13823,20 +13801,7 @@ DEFPY(ospf_instance_shutdown, ospf_instance_shutdown_cmd,
 			return CMD_WARNING_CONFIG_FAILED;
 		}
 
-		/* Reenable routing instance in the GR mode. */
-		ospf_gr_restart_enter(ospf, OSPF_GR_SWITCH_CONTROL_PROCESSOR,
-				      time(NULL) + ospf->gr_info.grace_period);
-
-		/*
-		 * RFC 3623 - Section 5 ("Unplanned Outages"):
-		 * "The grace-LSAs are encapsulated in Link State Update
-		 * Packets and sent out to all interfaces, even though
-		 * the restarted router has no adjacencies and no
-		 * knowledge of previous adjacencies".
-		 */
-		for (ALL_LIST_ELEMENTS_RO(ospf->areas, node, area))
-			for (ALL_LIST_ELEMENTS_RO(area->oiflist, inode, oi))
-				ospf_gr_unplanned_start_interface(oi);
+		ospf_gr_shutdown_enter(ospf);
 	}
 
 	ospf_shutdown(ospf, !no);

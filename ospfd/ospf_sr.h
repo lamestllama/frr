@@ -350,6 +350,20 @@ extern void ospf_sr_ext_itf_add(struct ext_itf *exti);
 extern void ospf_sr_ext_itf_delete(struct ext_itf *exti);
 /* Segment Routing configuration functions */
 extern void ospf_sr_config_write_router(struct vty *vty);
+extern int ospf_sr_blocks_validate(uint32_t gb_lower, uint32_t gb_upper,
+				   uint32_t lb_lower, uint32_t lb_upper,
+				   char *errmsg, size_t errmsg_len);
+extern int ospf_sr_blocks_set(uint32_t gb_lower, uint32_t gb_upper,
+			      uint32_t lb_lower, uint32_t lb_upper,
+			      char *errmsg, size_t errmsg_len);
+extern int ospf_sr_enabled_set(struct ospf *ospf, bool enabled);
+extern void ospf_sr_node_msd_set(uint32_t msd);
+extern void ospf_sr_node_msd_unset(void);
+extern int ospf_sr_prefix_sid_set(struct prefix_ipv4 *prefv4, uint32_t index,
+				  uint8_t flags, struct sr_prefix **srp,
+				  char *errmsg, size_t errmsg_len);
+extern int ospf_sr_prefix_sid_delete(struct sr_prefix *srp, char *errmsg,
+				     size_t errmsg_len);
 extern void ospf_sr_update_local_prefix(struct interface *ifp,
 					struct prefix *p);
 /* Segment Routing re-routing function */

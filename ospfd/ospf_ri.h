@@ -235,6 +235,19 @@ extern int ospf_router_info_init(void);
 extern void ospf_router_info_term(void);
 extern void ospf_router_info_finish(void);
 extern int ospf_router_info_enable(void);
+extern int ospf_router_info_set(struct ospf *ospf, uint8_t scope, char *errmsg,
+				size_t errmsg_len);
+extern void ospf_router_info_unset(void);
+extern void ospf_pce_address_set(struct in_addr address);
+extern void ospf_pce_address_unset(void);
+extern void ospf_pce_scope_set(uint32_t scope);
+extern void ospf_pce_scope_unset(void);
+extern struct ri_pce_subtlv_domain *ospf_pce_domain_as_set(uint32_t as);
+extern void ospf_pce_domain_as_unset(struct ri_pce_subtlv_domain *domain);
+extern struct ri_pce_subtlv_neighbor *ospf_pce_neighbor_as_set(uint32_t as);
+extern void ospf_pce_neighbor_as_unset(struct ri_pce_subtlv_neighbor *neighbor);
+extern void ospf_pce_flag_set(uint32_t flag);
+extern void ospf_pce_flag_unset(void);
 extern void ospf_router_info_update_sr(bool enable, struct sr_node *self);
 extern struct scope_info ospf_router_info_get_flooding_scope(void);
 #endif /* _ZEBRA_OSPF_ROUTER_INFO_H */

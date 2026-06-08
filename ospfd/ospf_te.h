@@ -401,6 +401,16 @@ extern int ospf_mpls_te_init(void);
 extern void ospf_mpls_te_term(void);
 extern void ospf_mpls_te_finish(void);
 extern struct ospf_mpls_te *get_ospf_mpls_te(void);
+extern int ospf_mpls_te_enabled_set(struct ospf *ospf, bool enabled,
+				    char *errmsg, size_t errmsg_len);
+extern void ospf_mpls_te_router_addr_set(struct in_addr value);
+extern void ospf_mpls_te_router_addr_unset(void);
+extern int ospf_mpls_te_export_set(bool enabled, char *errmsg,
+				   size_t errmsg_len);
+extern int ospf_mpls_te_inter_as_set(enum inter_as_mode mode,
+				     struct in_addr area_id, char *errmsg,
+				     size_t errmsg_len);
+extern void ospf_mpls_te_inter_as_unset(void);
 extern void ospf_mpls_te_update_if(struct interface *ifp);
 extern void ospf_mpls_te_lsa_schedule(struct mpls_te_link *lp, enum lsa_opcode opcode);
 extern void set_linkparams_llri(struct mpls_te_link *lp, uint32_t local, uint32_t remote);

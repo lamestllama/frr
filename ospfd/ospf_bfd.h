@@ -33,6 +33,15 @@ extern void ospf_interface_bfd_show(struct vty *vty,
 extern void ospf_interface_disable_bfd(struct interface *ifp,
 				       struct ospf_if_params *oip);
 
+/* Allocate interface BFD configuration with FRR defaults if needed. */
+extern struct bfd_configuration *ospf_interface_bfd_config_get(struct interface *ifp);
+
+/* Enable interface BFD sessions, preserving configured timers/profile. */
+extern void ospf_interface_enable_bfd(struct interface *ifp, bool quick);
+
+/* Push interface BFD configuration changes to live neighbour sessions. */
+extern void ospf_interface_bfd_apply(struct interface *ifp);
+
 /**
  * Create/update BFD session for this OSPF neighbor.
  */

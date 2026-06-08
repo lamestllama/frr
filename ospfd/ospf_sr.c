@@ -583,6 +583,28 @@ static void ospf_sr_stop(void)
 	OspfSR.msd = 0;
 }
 
+int ospf_sr_enabled_set(struct ospf *ospf, bool enabled)
+{
+	if (enabled) {
+		if (OspfSR.status != SR_OFF)
+			return 0;
+		if (ospf->vrf_id != VRF_DEFAULT)
+			return -1;
+
+		OspfSR.status = SR_ON;
+		ospf_sr_start(ospf);
+		return 1;
+	}
+
+	if (OspfSR.status == SR_OFF)
+		return 0;
+
+	ospf_ext_update_sr(false);
+	ospf_router_info_update_sr(false, OspfSR.self);
+	ospf_sr_stop();
+	return 1;
+}
+
 /*
  * Segment Routing initialize function
  *
@@ -2198,21 +2220,18 @@ DEFUN(ospf_sr_enable,
 {
 
 	VTY_DECLVAR_INSTANCE_CONTEXT(ospf, ospf);
+	int ret;
 
-	if (OspfSR.status != SR_OFF)
-		return CMD_SUCCESS;
-
-	if (ospf->vrf_id != VRF_DEFAULT) {
+	ret = ospf_sr_enabled_set(ospf, true);
+	if (ret < 0) {
 		vty_out(vty,
 			"Segment Routing is only supported in default VRF\n");
 		return CMD_WARNING_CONFIG_FAILED;
 	}
+	if (!ret)
+		return CMD_SUCCESS;
 
 	osr_debug("SR: Segment Routing: OFF -> ON");
-
-	/* Start Segment Routing */
-	OspfSR.status = SR_ON;
-	ospf_sr_start(ospf);
 
 	return CMD_SUCCESS;
 }
@@ -2224,20 +2243,11 @@ DEFUN (no_ospf_sr_enable,
        SR_STR
        "Disable Segment Routing\n")
 {
+	int ret;
 
-	if (OspfSR.status == SR_OFF)
-		return CMD_SUCCESS;
-
-	osr_debug("SR: Segment Routing: ON -> OFF");
-
-	/* Start by Disabling Extended Link & Prefix LSA */
-	ospf_ext_update_sr(false);
-
-	/* then, disable Router Information SR parameters */
-	ospf_router_info_update_sr(false, OspfSR.self);
-
-	/* Finally, stop Segment Routing */
-	ospf_sr_stop();
+	ret = ospf_sr_enabled_set(NULL, false);
+	if (ret)
+		osr_debug("SR: Segment Routing: ON -> OFF");
 
 	return CMD_SUCCESS;
 }
@@ -2253,6 +2263,185 @@ static int ospf_sr_enabled(struct vty *vty)
 	return 0;
 }
 
+void ospf_sr_node_msd_set(uint32_t msd)
+{
+	if (OspfSR.msd == msd)
+		return;
+
+	OspfSR.msd = msd;
+	if (OspfSR.self != NULL) {
+		OspfSR.self->msd = msd;
+
+		if (OspfSR.status == SR_UP)
+			ospf_router_info_update_sr(true, OspfSR.self);
+	}
+}
+
+void ospf_sr_node_msd_unset(void)
+{
+	OspfSR.msd = 0;
+	if (OspfSR.self != NULL) {
+		OspfSR.self->msd = 0;
+
+		if (OspfSR.status == SR_UP)
+			ospf_router_info_update_sr(true, OspfSR.self);
+	}
+}
+
+int ospf_sr_prefix_sid_set(struct prefix_ipv4 *prefv4, uint32_t index,
+			   uint8_t flags, struct sr_prefix **srp_out,
+			   char *errmsg, size_t errmsg_len)
+{
+	struct prefix p = {};
+	struct prefix pexist;
+	struct listnode *node;
+	struct sr_prefix *srp;
+	struct sr_prefix *exist = NULL;
+	struct interface *ifp;
+	bool index_in_use = false;
+	bool no_php_flag = CHECK_FLAG(flags, EXT_SUBTLV_PREFIX_SID_NPFLG);
+	bool exp_null = CHECK_FLAG(flags, EXT_SUBTLV_PREFIX_SID_EFLG);
+
+	if (srp_out)
+		*srp_out = NULL;
+	if (OspfSR.status == SR_OFF || OspfSR.self == NULL) {
+		snprintf(errmsg, errmsg_len, "OSPF SR is not turned on");
+		return -1;
+	}
+	if (index > OspfSR.srgb.size - 1) {
+		snprintf(errmsg, errmsg_len,
+			 "Index %u must be lower than range size %u", index,
+			 OspfSR.srgb.size);
+		return -1;
+	}
+
+	p.family = AF_INET;
+	p.prefixlen = prefv4->prefixlen;
+	p.u.prefix4 = prefv4->prefix;
+
+	for (ALL_LIST_ELEMENTS_RO(OspfSR.self->ext_prefix, node, srp)) {
+		if (prefix_same((struct prefix *)&srp->prefv4, &p))
+			exist = srp;
+		if (srp->sid == index) {
+			index_in_use = true;
+			pexist = *(struct prefix *)&srp->prefv4;
+		}
+	}
+
+	if (exist && exist->sid == index && exist->flags == flags) {
+		if (srp_out)
+			*srp_out = exist;
+		return 0;
+	}
+
+	if (index_in_use && (!exist || exist->sid != index)) {
+		snprintf(errmsg, errmsg_len, "Index %u is already used by %pFX",
+			 index, &pexist);
+		return -1;
+	}
+
+	if (exist && CHECK_FLAG(exist->flags, EXT_SUBTLV_PREFIX_SID_NPFLG) &&
+	    !CHECK_FLAG(exist->flags, EXT_SUBTLV_PREFIX_SID_EFLG))
+		ospf_zebra_delete_prefix_sid(exist);
+
+	if (exist == NULL) {
+		srp = XCALLOC(MTYPE_OSPF_SR_PARAMS, sizeof(struct sr_prefix));
+		IPV4_ADDR_COPY(&srp->prefv4.prefix, &p.u.prefix4);
+		srp->prefv4.prefixlen = p.prefixlen;
+		srp->prefv4.family = p.family;
+		srp->type = LOCAL_SID;
+	} else {
+		srp = exist;
+	}
+
+	srp->label_in = 0;
+	srp->nhlfe.label_out = 0;
+	srp->sid = index;
+	srp->flags = flags;
+
+	if (no_php_flag) {
+		srp->label_in = index2label(srp->sid, OspfSR.self->srgb);
+		srp->nhlfe.label_out = MPLS_LABEL_IMPLICIT_NULL;
+	}
+
+	ifp = if_lookup_prefix(&p, VRF_DEFAULT);
+	if (ifp == NULL) {
+		if (exist == NULL)
+			listnode_add(OspfSR.self->ext_prefix, srp);
+		zlog_info(
+			"Interface for prefix %pFX not found. Deferred LSA flooding",
+			&p);
+		if (srp_out)
+			*srp_out = srp;
+		return 0;
+	}
+
+	if (!if_is_loopback(ifp)) {
+		snprintf(errmsg, errmsg_len, "interface %s is not a Loopback",
+			 ifp->name);
+		if (exist == NULL)
+			XFREE(MTYPE_OSPF_SR_PARAMS, srp);
+		return -1;
+	}
+	srp->nhlfe.ifindex = ifp->ifindex;
+
+	if (!exist)
+		listnode_add(OspfSR.self->ext_prefix, srp);
+
+	if (OspfSR.status == SR_UP) {
+		if (no_php_flag && !exp_null)
+			ospf_zebra_update_prefix_sid(srp);
+
+		srp->instance = ospf_ext_schedule_prefix_index(
+			ifp, srp->sid, &srp->prefv4, srp->flags);
+		if (srp->instance == 0) {
+			snprintf(errmsg, errmsg_len,
+				 "Unable to set index %u for prefix %pFX", index,
+				 &p);
+			return -1;
+		}
+	}
+
+	if (srp_out)
+		*srp_out = srp;
+	return 0;
+}
+
+int ospf_sr_prefix_sid_delete(struct sr_prefix *srp, char *errmsg,
+			      size_t errmsg_len)
+{
+	struct interface *ifp;
+
+	if (!srp)
+		return 0;
+	if (OspfSR.status != SR_UP) {
+		listnode_delete(OspfSR.self->ext_prefix, srp);
+		XFREE(MTYPE_OSPF_SR_PARAMS, srp);
+		return 0;
+	}
+
+	ifp = if_lookup_by_index(srp->nhlfe.ifindex, VRF_DEFAULT);
+	if (ifp == NULL) {
+		listnode_delete(OspfSR.self->ext_prefix, srp);
+		XFREE(MTYPE_OSPF_SR_PARAMS, srp);
+		return 0;
+	}
+
+	if (!ospf_ext_schedule_prefix_index(ifp, 0, NULL, 0)) {
+		snprintf(errmsg, errmsg_len,
+			 "No corresponding loopback interface. Abort");
+		return -1;
+	}
+
+	if (CHECK_FLAG(srp->flags, EXT_SUBTLV_PREFIX_SID_NPFLG) &&
+	    !CHECK_FLAG(srp->flags, EXT_SUBTLV_PREFIX_SID_EFLG))
+		ospf_zebra_delete_prefix_sid(srp);
+
+	listnode_delete(OspfSR.self->ext_prefix, srp);
+	XFREE(MTYPE_OSPF_SR_PARAMS, srp);
+	return 0;
+}
+
 /* tell if two ranges [r1_lower, r1_upper] and [r2_lower,r2_upper] overlap */
 static bool ranges_overlap(uint32_t r1_lower, uint32_t r1_upper,
 			   uint32_t r2_lower, uint32_t r2_upper)
@@ -2265,6 +2454,30 @@ static bool ranges_overlap(uint32_t r1_lower, uint32_t r1_upper,
 static bool sr_range_is_valid(uint32_t lower, uint32_t upper, uint32_t min_size)
 {
 	return (upper >= lower + min_size);
+}
+
+int ospf_sr_blocks_validate(uint32_t gb_lower, uint32_t gb_upper,
+			    uint32_t lb_lower, uint32_t lb_upper,
+			    char *errmsg, size_t errmsg_len)
+{
+	if (!sr_range_is_valid(gb_lower, gb_upper, MIN_SRGB_SIZE)) {
+		snprintf(errmsg, errmsg_len, "Invalid SRGB range");
+		return -1;
+	}
+
+	if (!sr_range_is_valid(lb_lower, lb_upper, MIN_SRLB_SIZE)) {
+		snprintf(errmsg, errmsg_len, "Invalid SRLB range");
+		return -1;
+	}
+
+	if (ranges_overlap(gb_lower, gb_upper, lb_lower, lb_upper)) {
+		snprintf(errmsg, errmsg_len,
+			 "New SR Global Block (%u/%u) conflicts with Local Block (%u/%u)",
+			 gb_lower, gb_upper, lb_lower, lb_upper);
+		return -1;
+	}
+
+	return 0;
 }
 
 /**
@@ -2366,6 +2579,23 @@ static int update_sr_blocks(uint32_t gb_lower, uint32_t gb_upper,
 	return 0;
 }
 
+int ospf_sr_blocks_set(uint32_t gb_lower, uint32_t gb_upper,
+		       uint32_t lb_lower, uint32_t lb_upper, char *errmsg,
+		       size_t errmsg_len)
+{
+	if (ospf_sr_blocks_validate(gb_lower, gb_upper, lb_lower, lb_upper,
+				    errmsg, errmsg_len) < 0)
+		return -1;
+
+	if (update_sr_blocks(gb_lower, gb_upper, lb_lower, lb_upper) < 0) {
+		snprintf(errmsg, errmsg_len,
+			 "Unable to update Segment Routing label blocks");
+		return -1;
+	}
+
+	return 0;
+}
+
 DEFUN(sr_global_label_range, sr_global_label_range_cmd,
       "segment-routing global-block (16-1048575) (16-1048575) [local-block (16-1048575) (16-1048575)]",
       SR_STR
@@ -2380,6 +2610,7 @@ DEFUN(sr_global_label_range, sr_global_label_range_cmd,
 	uint32_t gb_upper, gb_lower;
 	int idx_gb_low = 2, idx_gb_up = 3;
 	int idx_lb_low = 5, idx_lb_up = 6;
+	char errmsg[128];
 
 	/* Get lower and upper bound for mandatory global-block */
 	gb_lower = strtoul(argv[idx_gb_low]->arg, NULL, 10);
@@ -2391,30 +2622,13 @@ DEFUN(sr_global_label_range, sr_global_label_range_cmd,
 	lb_lower = argc > idx_lb_low ? strtoul(argv[idx_lb_low]->arg, NULL, 10)
 				     : OspfSR.srlb.start;
 
-	/* check correctness of input SRGB */
-	if (!sr_range_is_valid(gb_lower, gb_upper, MIN_SRGB_SIZE)) {
-		vty_out(vty, "Invalid SRGB range\n");
+	if (ospf_sr_blocks_set(gb_lower, gb_upper, lb_lower, lb_upper,
+			       errmsg, sizeof(errmsg)) < 0) {
+		vty_out(vty, "%s\n", errmsg);
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
-	/* check correctness of SRLB */
-	if (!sr_range_is_valid(lb_lower, lb_upper, MIN_SRLB_SIZE)) {
-		vty_out(vty, "Invalid SRLB range\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
-
-	/* Validate SRGB against SRLB */
-	if (ranges_overlap(gb_lower, gb_upper, lb_lower, lb_upper)) {
-		vty_out(vty,
-			"New SR Global Block (%u/%u) conflicts with Local Block (%u/%u)\n",
-			gb_lower, gb_upper, lb_lower, lb_upper);
-		return CMD_WARNING_CONFIG_FAILED;
-	}
-
-	if (update_sr_blocks(gb_lower, gb_upper, lb_lower, lb_upper) < 0)
-		return CMD_WARNING_CONFIG_FAILED;
-	else
-		return CMD_SUCCESS;
+	return CMD_SUCCESS;
 }
 
 DEFUN(no_sr_global_label_range, no_sr_global_label_range_cmd,
@@ -2427,12 +2641,16 @@ DEFUN(no_sr_global_label_range, no_sr_global_label_range_cmd,
       "Lower-bound range in decimal (16-1048575)\n"
       "Upper-bound range in decimal (16-1048575)\n")
 {
-	if (update_sr_blocks(DEFAULT_SRGB_LABEL, DEFAULT_SRGB_END,
-			     DEFAULT_SRLB_LABEL, DEFAULT_SRLB_END)
-	    < 0)
+	char errmsg[128];
+
+	if (ospf_sr_blocks_set(DEFAULT_SRGB_LABEL, DEFAULT_SRGB_END,
+			       DEFAULT_SRLB_LABEL, DEFAULT_SRLB_END, errmsg,
+			       sizeof(errmsg)) < 0) {
+		vty_out(vty, "%s\n", errmsg);
 		return CMD_WARNING_CONFIG_FAILED;
-	else
-		return CMD_SUCCESS;
+	}
+
+	return CMD_SUCCESS;
 }
 
 DEFUN (sr_node_msd,
@@ -2457,19 +2675,7 @@ DEFUN (sr_node_msd,
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
-	/* Check if value has changed */
-	if (OspfSR.msd == msd)
-		return CMD_SUCCESS;
-
-	/* Set this router MSD */
-	OspfSR.msd = msd;
-	if (OspfSR.self != NULL) {
-		OspfSR.self->msd = msd;
-
-		/* Set Router Information parameters if SR is UP */
-		if (OspfSR.status == SR_UP)
-			ospf_router_info_update_sr(true, OspfSR.self);
-	}
+	ospf_sr_node_msd_set(msd);
 
 	return CMD_SUCCESS;
 }
@@ -2486,15 +2692,7 @@ DEFUN (no_sr_node_msd,
 	if (!ospf_sr_enabled(vty))
 		return CMD_WARNING_CONFIG_FAILED;
 
-	/* unset this router MSD */
-	OspfSR.msd = 0;
-	if (OspfSR.self != NULL) {
-		OspfSR.self->msd = 0;
-
-		/* Set Router Information parameters if SR is UP */
-		if (OspfSR.status == SR_UP)
-			ospf_router_info_update_sr(true, OspfSR.self);
-	}
+	ospf_sr_node_msd_unset();
 
 	return CMD_SUCCESS;
 }

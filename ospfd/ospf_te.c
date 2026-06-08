@@ -4312,6 +4312,212 @@ static void ospf_mpls_te_config_write_router(struct vty *vty)
 	return;
 }
 
+int ospf_mpls_te_enabled_set(struct ospf *ospf, bool enabled, char *errmsg,
+			     size_t errmsg_len)
+{
+	struct listnode *node, *nnode;
+	struct mpls_te_link *lp;
+
+	if (enabled) {
+		if (OspfMplsTE.enabled)
+			return 0;
+
+		if (ospf->vrf_id != VRF_DEFAULT) {
+			snprintf(errmsg, errmsg_len,
+				 "MPLS TE is only supported in default VRF");
+			return -1;
+		}
+
+		ote_debug("MPLS-TE: OFF -> ON");
+
+		OspfMplsTE.enabled = true;
+
+		ospf_mpls_te_foreach_area(ospf_mpls_te_lsa_schedule,
+					  REORIGINATE_THIS_LSA);
+
+		if (OspfMplsTE.inter_as != Off) {
+			for (ALL_LIST_ELEMENTS_RO(OspfMplsTE.iflist, node, lp))
+				if (IS_INTER_AS(lp->type))
+					ospf_mpls_te_lsa_schedule(
+						lp, REORIGINATE_THIS_LSA);
+		}
+
+		OspfMplsTE.ted = ls_ted_new(1, "OSPF", 0);
+		if (!OspfMplsTE.ted) {
+			snprintf(errmsg, errmsg_len,
+				 "Unable to create Link State Data Base");
+			return -1;
+		}
+		ospf_te_init_ted(OspfMplsTE.ted, ospf);
+		return 0;
+	}
+
+	if (!OspfMplsTE.enabled)
+		return 0;
+
+	ote_debug("MPLS-TE: ON -> OFF");
+
+	ls_ted_del_all(&OspfMplsTE.ted);
+	OspfMplsTE.enabled = false;
+
+	for (ALL_LIST_ELEMENTS(OspfMplsTE.iflist, node, nnode, lp))
+		if (CHECK_FLAG(lp->flags, LPFLG_LSA_ENGAGED))
+			ospf_mpls_te_lsa_schedule(lp, FLUSH_THIS_LSA);
+
+	OspfMplsTE.inter_as = Off;
+	return 0;
+}
+
+void ospf_mpls_te_router_addr_set(struct in_addr value)
+{
+	struct te_tlv_router_addr *ra = &OspfMplsTE.router_addr;
+	struct listnode *node, *nnode;
+	struct mpls_te_link *lp;
+	int need_to_reoriginate = 0;
+
+	if (ntohs(ra->header.type) != 0 &&
+	    ntohl(ra->value.s_addr) == ntohl(value.s_addr))
+		return;
+
+	set_mpls_te_router_addr(value);
+
+	if (!OspfMplsTE.enabled)
+		return;
+
+	for (ALL_LIST_ELEMENTS(OspfMplsTE.iflist, node, nnode, lp)) {
+		if ((lp->area == NULL) || IS_FLOOD_AS(lp->flags))
+			continue;
+
+		if (!CHECK_FLAG(lp->flags, LPFLG_LSA_ENGAGED)) {
+			need_to_reoriginate = 1;
+			break;
+		}
+	}
+
+	for (ALL_LIST_ELEMENTS(OspfMplsTE.iflist, node, nnode, lp)) {
+		if ((lp->area == NULL) || IS_FLOOD_AS(lp->flags))
+			continue;
+
+		if (need_to_reoriginate)
+			SET_FLAG(lp->flags, LPFLG_LSA_FORCED_REFRESH);
+		else
+			ospf_mpls_te_lsa_schedule(lp, REFRESH_THIS_LSA);
+	}
+
+	if (need_to_reoriginate)
+		ospf_mpls_te_foreach_area(ospf_mpls_te_lsa_schedule,
+					  REORIGINATE_THIS_LSA);
+}
+
+void ospf_mpls_te_router_addr_unset(void)
+{
+	struct listnode *node, *nnode;
+	struct mpls_te_link *lp;
+
+	OspfMplsTE.router_addr.header.type = 0;
+	OspfMplsTE.router_addr.header.length = 0;
+	memset(&OspfMplsTE.router_addr.value, 0,
+	       sizeof(OspfMplsTE.router_addr.value));
+
+	if (!OspfMplsTE.enabled)
+		return;
+
+	for (ALL_LIST_ELEMENTS(OspfMplsTE.iflist, node, nnode, lp))
+		if (CHECK_FLAG(lp->flags, LPFLG_LSA_ENGAGED))
+			ospf_mpls_te_lsa_schedule(lp, FLUSH_THIS_LSA);
+}
+
+int ospf_mpls_te_export_set(bool enabled, char *errmsg, size_t errmsg_len)
+{
+	if (enabled) {
+		if (OspfMplsTE.export)
+			return 0;
+		if (!OspfMplsTE.enabled) {
+			snprintf(errmsg, errmsg_len,
+				 "mpls-te has not been turned on");
+			return -1;
+		}
+		if (ls_register(ospf_zclient, true) != 0) {
+			snprintf(errmsg, errmsg_len,
+				 "Unable to register Link State");
+			return -1;
+		}
+		OspfMplsTE.export = true;
+		return 0;
+	}
+
+	if (OspfMplsTE.export) {
+		if (ls_unregister(ospf_zclient, true) != 0) {
+			snprintf(errmsg, errmsg_len,
+				 "Unable to unregister Link State");
+			return -1;
+		}
+		OspfMplsTE.export = false;
+	}
+
+	return 0;
+}
+
+int ospf_mpls_te_inter_as_set(enum inter_as_mode mode, struct in_addr area_id,
+			      char *errmsg, size_t errmsg_len)
+{
+	struct listnode *node;
+	struct mpls_te_link *lp;
+
+	if (!OspfMplsTE.enabled) {
+		snprintf(errmsg, errmsg_len, "mpls-te has not been turned on");
+		return -1;
+	}
+
+	if (OspfMplsTE.inter_as == mode) {
+		if (mode != Area ||
+		    IPV4_ADDR_SAME(&OspfMplsTE.interas_areaid, &area_id))
+			return 0;
+	}
+
+	if (OspfMplsTE.inter_as != Off) {
+		snprintf(errmsg, errmsg_len,
+			 "Please disable Inter-AS support before changing mode");
+		return -1;
+	}
+
+	if (mode == Area)
+		OspfMplsTE.interas_areaid = area_id;
+
+	ote_debug("MPLS-TE (%s): Inter-AS enable with %s flooding support",
+		  __func__, mode2text[mode]);
+
+	OspfMplsTE.inter_as = mode;
+	for (ALL_LIST_ELEMENTS_RO(OspfMplsTE.iflist, node, lp)) {
+		if (IS_INTER_AS(lp->type)) {
+			if (mode == AS)
+				SET_FLAG(lp->flags, LPFLG_LSA_FLOOD_AS);
+			else
+				UNSET_FLAG(lp->flags, LPFLG_LSA_FLOOD_AS);
+			ospf_mpls_te_lsa_schedule(lp, REORIGINATE_THIS_LSA);
+		}
+	}
+
+	return 0;
+}
+
+void ospf_mpls_te_inter_as_unset(void)
+{
+	struct listnode *node, *nnode;
+	struct mpls_te_link *lp;
+
+	ote_debug("MPLS-TE: Inter-AS support OFF");
+
+	if (OspfMplsTE.enabled && OspfMplsTE.inter_as != Off) {
+		for (ALL_LIST_ELEMENTS(OspfMplsTE.iflist, node, nnode, lp))
+			if (IS_INTER_AS(lp->type) &&
+			    CHECK_FLAG(lp->flags, LPFLG_LSA_ENGAGED))
+				ospf_mpls_te_lsa_schedule(lp, FLUSH_THIS_LSA);
+	}
+
+	OspfMplsTE.inter_as = Off;
+}
+
 /*------------------------------------------------------------------------*
  * Following are vty command functions.
  *------------------------------------------------------------------------*/
