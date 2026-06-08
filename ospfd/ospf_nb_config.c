@@ -1588,6 +1588,53 @@ static void routing_ospf_distance_update(struct ospf *ospf, uint8_t *field,
 	ospf_restart_spf(ospf);
 }
 
+static uint8_t *routing_ospf_distance_field(struct ospf *ospf, size_t offset)
+{
+	return (uint8_t *)((char *)ospf + offset);
+}
+
+static int routing_ospf_distance_modify(struct nb_cb_modify_args *args,
+					size_t offset)
+{
+	struct ospf *ospf;
+
+	switch (args->event) {
+	case NB_EV_VALIDATE:
+	case NB_EV_PREPARE:
+	case NB_EV_ABORT:
+		break;
+	case NB_EV_APPLY:
+		ospf = routing_ospf_get(args->dnode);
+		routing_ospf_distance_update(
+			ospf, routing_ospf_distance_field(ospf, offset),
+			yang_dnode_get_uint8(args->dnode, NULL));
+		break;
+	}
+
+	return NB_OK;
+}
+
+static int routing_ospf_distance_destroy(struct nb_cb_destroy_args *args,
+					 size_t offset, uint8_t distance)
+{
+	struct ospf *ospf;
+
+	switch (args->event) {
+	case NB_EV_VALIDATE:
+	case NB_EV_PREPARE:
+	case NB_EV_ABORT:
+		break;
+	case NB_EV_APPLY:
+		ospf = routing_ospf_get(args->dnode);
+		routing_ospf_distance_update(
+			ospf, routing_ospf_distance_field(ospf, offset),
+			distance);
+		break;
+	}
+
+	return NB_OK;
+}
+
 static void routing_ospf_timers_spf_update(struct ospf *ospf,
 					   unsigned int delay,
 					   unsigned int hold,
@@ -7049,41 +7096,15 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_redistrib
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_admin_value_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_distance_update(
-			ospf, &ospf->distance_all,
-			yang_dnode_get_uint8(args->dnode, NULL));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_distance_modify(args,
+					    offsetof(struct ospf, distance_all));
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_admin_value_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_distance_update(ospf, &ospf->distance_all, 0);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_distance_destroy(
+		args, offsetof(struct ospf, distance_all), 0);
 }
 
 /*
@@ -7091,45 +7112,17 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_ospf_external_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_distance_update(
-			ospf, &ospf->distance_external,
-			yang_dnode_get_uint8(args->dnode, NULL));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_distance_modify(
+		args, offsetof(struct ospf, distance_external));
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_ospf_external_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_distance_update(
-			ospf, &ospf->distance_external,
-			yang_get_default_uint8(
-				FRR_OSPFD_OSPF_XPATH
-				"/distance/ospf/external"));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_distance_destroy(
+		args, offsetof(struct ospf, distance_external),
+		yang_get_default_uint8(FRR_OSPFD_OSPF_XPATH
+				       "/distance/ospf/external"));
 }
 
 /*
@@ -7137,45 +7130,17 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_ospf_inter_area_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_distance_update(
-			ospf, &ospf->distance_inter,
-			yang_dnode_get_uint8(args->dnode, NULL));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_distance_modify(
+		args, offsetof(struct ospf, distance_inter));
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_ospf_inter_area_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_distance_update(
-			ospf, &ospf->distance_inter,
-			yang_get_default_uint8(
-				FRR_OSPFD_OSPF_XPATH
-				"/distance/ospf/inter-area"));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_distance_destroy(
+		args, offsetof(struct ospf, distance_inter),
+		yang_get_default_uint8(FRR_OSPFD_OSPF_XPATH
+				       "/distance/ospf/inter-area"));
 }
 
 /*
@@ -7183,45 +7148,17 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_ospf_intra_area_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_distance_update(
-			ospf, &ospf->distance_intra,
-			yang_dnode_get_uint8(args->dnode, NULL));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_distance_modify(
+		args, offsetof(struct ospf, distance_intra));
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_distance_ospf_intra_area_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_distance_update(
-			ospf, &ospf->distance_intra,
-			yang_get_default_uint8(
-				FRR_OSPFD_OSPF_XPATH
-				"/distance/ospf/intra-area"));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_distance_destroy(
+		args, offsetof(struct ospf, distance_intra),
+		yang_get_default_uint8(FRR_OSPFD_OSPF_XPATH
+				       "/distance/ospf/intra-area"));
 }
 
 /*
