@@ -6726,29 +6726,13 @@ static const void *routing_control_plane_protocols_control_plane_protocol_ospf_s
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_summary_address_tag_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_summary_address_tag_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -6756,15 +6740,7 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_summary_a
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_summary_address_no_advertise_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
@@ -6817,15 +6793,7 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_aggregati
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_default_information_originate_create(struct nb_cb_create_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_create_apply_finish(args);
 }
 
 
@@ -6848,15 +6816,7 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_default_i
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_default_information_originate_always_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
@@ -6865,29 +6825,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_default_i
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_default_information_originate_metric_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_default_information_originate_metric_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -6895,29 +6839,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_default_i
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_default_information_originate_metric_type_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_default_information_originate_metric_type_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -6925,29 +6853,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_default_i
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_default_information_originate_route_map_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_default_information_originate_route_map_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -7006,29 +6918,13 @@ static const void *routing_control_plane_protocols_control_plane_protocol_ospf_r
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_redistribute_metric_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_redistribute_metric_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -7036,29 +6932,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_redistrib
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_redistribute_metric_type_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_redistribute_metric_type_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -7066,29 +6946,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_redistrib
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_redistribute_route_map_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_redistribute_route_map_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-	case NB_EV_APPLY:
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
