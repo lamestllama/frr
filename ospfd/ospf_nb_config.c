@@ -758,6 +758,36 @@ static int routing_ospf_area_range_cost_delete(const struct lyd_node *dnode,
 	return NB_OK;
 }
 
+static int routing_ospf_area_range_option_modify(struct nb_cb_modify_args *args,
+						 bool nssa)
+{
+	switch (args->event) {
+	case NB_EV_VALIDATE:
+	case NB_EV_PREPARE:
+	case NB_EV_ABORT:
+		break;
+	case NB_EV_APPLY:
+		return routing_ospf_area_range_apply(args->dnode, nssa);
+	}
+
+	return NB_OK;
+}
+
+static int
+routing_ospf_area_range_cost_destroy(struct nb_cb_destroy_args *args, bool nssa)
+{
+	switch (args->event) {
+	case NB_EV_VALIDATE:
+	case NB_EV_PREPARE:
+	case NB_EV_ABORT:
+		break;
+	case NB_EV_APPLY:
+		return routing_ospf_area_range_cost_delete(args->dnode, nssa);
+	}
+
+	return NB_OK;
+}
+
 static int lib_interface_ospf_md5_key_set(struct ospf_if_params *params,
 					  uint8_t key_id, const char *key);
 static int lib_interface_ospf_md5_key_delete(struct ospf_if_params *params,
@@ -4916,6 +4946,18 @@ routing_control_plane_protocols_control_plane_protocol_ospf_apply_finish(struct 
 	ospf->write_oi_count = routing_ospf_get_uint8_default(
 		args->dnode, "write-multiplier",
 		FRR_OSPFD_OSPF_XPATH "/write-multiplier");
+	routing_ospf_rfc1583_update(
+		ospf, routing_ospf_get_bool_default(
+			      args->dnode, "compatible-rfc1583",
+			      FRR_OSPFD_OSPF_XPATH "/compatible-rfc1583"));
+	routing_ospf_flood_reduction_set(
+		ospf, routing_ospf_get_bool_default(
+			      args->dnode, "flood-reduction",
+			      FRR_OSPFD_OSPF_XPATH "/flood-reduction"));
+	routing_ospf_send_extra_data_update(
+		ospf, routing_ospf_get_bool_default(
+			      args->dnode, "send-extra-data",
+			      FRR_OSPFD_OSPF_XPATH "/send-extra-data"));
 }
 
 
@@ -5147,43 +5189,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_forwardin
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_compatible_rfc1583_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_rfc1583_update(
-			ospf, yang_dnode_get_bool(args->dnode, NULL));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_compatible_rfc1583_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_rfc1583_update(
-			ospf, yang_get_default_bool(
-				      FRR_OSPFD_OSPF_XPATH
-				      "/compatible-rfc1583"));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -5305,41 +5317,12 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_maximum_p
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_flood_reduction_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_flood_reduction_set(
-			ospf, yang_dnode_get_bool(args->dnode, NULL));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_flood_reduction_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_flood_reduction_set(
-			ospf, yang_get_default_bool(
-				      FRR_OSPFD_OSPF_XPATH "/flood-reduction"));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -5347,42 +5330,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_flood_red
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_send_extra_data_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_send_extra_data_update(
-			ospf, yang_dnode_get_bool(args->dnode, NULL));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_modify_apply_finish(args);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_send_extra_data_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf *ospf;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		ospf = routing_ospf_get(args->dnode);
-		routing_ospf_send_extra_data_update(
-			ospf, yang_get_default_bool(
-				      FRR_OSPFD_OSPF_XPATH "/send-extra-data"));
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_destroy_apply_finish(args);
 }
 
 /*
@@ -9049,25 +9003,11 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_create(struct nb_cb_create_args *args)
 {
-	struct ospf_area *area;
-	struct in_addr area_id;
-
 	switch (args->event) {
 	case NB_EV_VALIDATE:
 	case NB_EV_PREPARE:
 	case NB_EV_ABORT:
-		break;
 	case NB_EV_APPLY:
-		area = routing_ospf_area_get(args->dnode, true);
-		if (!area)
-			return NB_ERR_INCONSISTENCY;
-		if (routing_ospf_area_id(args->dnode, &area_id) < 0)
-			return NB_ERR_INCONSISTENCY;
-
-		ospf_area_nssa_default_originate_set(
-			area->ospf, area_id,
-			routing_ospf_area_nssa_metric(args->dnode),
-			routing_ospf_area_nssa_metric_type(args->dnode));
 		break;
 	}
 
@@ -9099,30 +9039,34 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
 	return NB_OK;
 }
 
+static void
+routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_apply_finish(
+	struct nb_cb_apply_finish_args *args)
+{
+	struct ospf_area *area;
+	struct in_addr area_id;
+
+	area = routing_ospf_area_get(args->dnode, true);
+	if (!area)
+		return;
+	if (routing_ospf_area_id(args->dnode, &area_id) < 0)
+		return;
+
+	ospf_area_nssa_default_originate_set(
+		area->ospf, area_id, routing_ospf_area_nssa_metric(args->dnode),
+		routing_ospf_area_nssa_metric_type(args->dnode));
+}
+
 /*
  * XPath: /frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/nssa/default-information-originate/metric
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_metric_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_area *area;
-	struct in_addr area_id;
-
 	switch (args->event) {
 	case NB_EV_VALIDATE:
 	case NB_EV_PREPARE:
 	case NB_EV_ABORT:
-		break;
 	case NB_EV_APPLY:
-		area = routing_ospf_area_get(args->dnode, true);
-		if (!area)
-			return NB_ERR_INCONSISTENCY;
-		if (routing_ospf_area_id(args->dnode, &area_id) < 0)
-			return NB_ERR_INCONSISTENCY;
-
-		ospf_area_nssa_default_originate_set(
-			area->ospf, area_id,
-			routing_ospf_area_nssa_metric(args->dnode),
-			routing_ospf_area_nssa_metric_type(args->dnode));
 		break;
 	}
 
@@ -9132,24 +9076,11 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_metric_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf_area *area;
-	struct in_addr area_id;
-
 	switch (args->event) {
 	case NB_EV_VALIDATE:
 	case NB_EV_PREPARE:
 	case NB_EV_ABORT:
-		break;
 	case NB_EV_APPLY:
-		area = routing_ospf_area_get(args->dnode, false);
-		if (!area)
-			return NB_OK;
-		if (routing_ospf_area_id(args->dnode, &area_id) < 0)
-			return NB_ERR_INCONSISTENCY;
-
-		ospf_area_nssa_default_originate_set(
-			area->ospf, area_id, -1,
-			routing_ospf_area_nssa_metric_type(args->dnode));
 		break;
 	}
 
@@ -9161,25 +9092,11 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_metric_type_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_area *area;
-	struct in_addr area_id;
-
 	switch (args->event) {
 	case NB_EV_VALIDATE:
 	case NB_EV_PREPARE:
 	case NB_EV_ABORT:
-		break;
 	case NB_EV_APPLY:
-		area = routing_ospf_area_get(args->dnode, true);
-		if (!area)
-			return NB_ERR_INCONSISTENCY;
-		if (routing_ospf_area_id(args->dnode, &area_id) < 0)
-			return NB_ERR_INCONSISTENCY;
-
-		ospf_area_nssa_default_originate_set(
-			area->ospf, area_id,
-			routing_ospf_area_nssa_metric(args->dnode),
-			routing_ospf_area_nssa_metric_type(args->dnode));
 		break;
 	}
 
@@ -9189,25 +9106,11 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_metric_type_destroy(struct nb_cb_destroy_args *args)
 {
-	struct ospf_area *area;
-	struct in_addr area_id;
-
 	switch (args->event) {
 	case NB_EV_VALIDATE:
 	case NB_EV_PREPARE:
 	case NB_EV_ABORT:
-		break;
 	case NB_EV_APPLY:
-		area = routing_ospf_area_get(args->dnode, false);
-		if (!area)
-			return NB_OK;
-		if (routing_ospf_area_id(args->dnode, &area_id) < 0)
-			return NB_ERR_INCONSISTENCY;
-
-		ospf_area_nssa_default_originate_set(
-			area->ospf, area_id,
-			routing_ospf_area_nssa_metric(args->dnode),
-			DEFAULT_METRIC_TYPE);
 		break;
 	}
 
@@ -9269,16 +9172,7 @@ static const void *routing_control_plane_protocols_control_plane_protocol_ospf_a
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_ranges_range_not_advertise_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		return routing_ospf_area_range_apply(args->dnode, true);
-	}
-
-	return NB_OK;
+	return routing_ospf_area_range_option_modify(args, true);
 }
 
 
@@ -9287,31 +9181,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_ranges_range_cost_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		return routing_ospf_area_range_apply(args->dnode, true);
-	}
-
-	return NB_OK;
+	return routing_ospf_area_range_option_modify(args, true);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_ranges_range_cost_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		return routing_ospf_area_range_cost_delete(args->dnode, true);
-	}
-
-	return NB_OK;
+	return routing_ospf_area_range_cost_destroy(args, true);
 }
 
 /*
@@ -9369,16 +9245,7 @@ static const void *routing_control_plane_protocols_control_plane_protocol_ospf_a
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_ranges_range_advertise_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		return routing_ospf_area_range_apply(args->dnode, false);
-	}
-
-	return NB_OK;
+	return routing_ospf_area_range_option_modify(args, false);
 }
 
 
@@ -9387,31 +9254,13 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_ranges_range_cost_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		return routing_ospf_area_range_apply(args->dnode, false);
-	}
-
-	return NB_OK;
+	return routing_ospf_area_range_option_modify(args, false);
 }
 
 
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_ranges_range_cost_destroy(struct nb_cb_destroy_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		return routing_ospf_area_range_cost_delete(args->dnode, false);
-	}
-
-	return NB_OK;
+	return routing_ospf_area_range_cost_destroy(args, false);
 }
 
 /*
@@ -9419,16 +9268,7 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_ranges_range_substitute_modify(struct nb_cb_modify_args *args)
 {
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		return routing_ospf_area_range_apply(args->dnode, false);
-	}
-
-	return NB_OK;
+	return routing_ospf_area_range_option_modify(args, false);
 }
 
 
@@ -11147,6 +10987,7 @@ const struct frr_yang_module_info frr_ospfd_nb_info = {
 		{
 			.xpath = "/frr-routing:routing/control-plane-protocols/control-plane-protocol/frr-ospfd:ospf/areas/area/nssa/default-information-originate",
 			.cbs = {
+				.apply_finish = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_apply_finish,
 				.create = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_create,
 				.destroy = routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_default_information_originate_destroy,
 			}
