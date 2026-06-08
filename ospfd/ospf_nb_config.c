@@ -526,6 +526,38 @@ routing_ospf_area_lookup(const struct lyd_node *dnode)
 	return ospf_area_lookup_by_area_id(ospf, area_id);
 }
 
+typedef int (*routing_ospf_area_flag_fn)(struct ospf *ospf,
+					 struct in_addr area_id);
+
+static int routing_ospf_area_flag_modify(struct nb_cb_modify_args *args,
+					 routing_ospf_area_flag_fn set,
+					 routing_ospf_area_flag_fn unset)
+{
+	struct ospf_area *area;
+	struct in_addr area_id;
+
+	switch (args->event) {
+	case NB_EV_VALIDATE:
+	case NB_EV_PREPARE:
+	case NB_EV_ABORT:
+		break;
+	case NB_EV_APPLY:
+		area = routing_ospf_area_get(args->dnode, true);
+		if (!area)
+			return NB_ERR_INCONSISTENCY;
+		if (routing_ospf_area_id(args->dnode, &area_id) < 0)
+			return NB_ERR_INCONSISTENCY;
+
+		if (yang_dnode_get_bool(args->dnode, NULL))
+			set(area->ospf, area_id);
+		else
+			unset(area->ospf, area_id);
+		break;
+	}
+
+	return NB_OK;
+}
+
 static void routing_ospf_area_announce_default(struct ospf_area *area)
 {
 	struct prefix_ipv4 p = {};
@@ -8678,29 +8710,8 @@ static void routing_control_plane_protocols_control_plane_protocol_ospf_areas_ar
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_no_summary_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_area *area;
-	struct in_addr area_id;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		area = routing_ospf_area_get(args->dnode, true);
-		if (!area)
-			return NB_ERR_INCONSISTENCY;
-		if (routing_ospf_area_id(args->dnode, &area_id) < 0)
-			return NB_ERR_INCONSISTENCY;
-
-		if (yang_dnode_get_bool(args->dnode, NULL))
-			ospf_area_nssa_no_summary_set(area->ospf, area_id);
-		else
-			ospf_area_no_summary_unset(area->ospf, area_id);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_area_flag_modify(args, ospf_area_nssa_no_summary_set,
+					     ospf_area_no_summary_unset);
 }
 
 
@@ -8749,29 +8760,8 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_nssa_suppress_fa_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_area *area;
-	struct in_addr area_id;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		area = routing_ospf_area_get(args->dnode, true);
-		if (!area)
-			return NB_ERR_INCONSISTENCY;
-		if (routing_ospf_area_id(args->dnode, &area_id) < 0)
-			return NB_ERR_INCONSISTENCY;
-
-		if (yang_dnode_get_bool(args->dnode, NULL))
-			ospf_area_nssa_suppress_fa_set(area->ospf, area_id);
-		else
-			ospf_area_nssa_suppress_fa_unset(area->ospf, area_id);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_area_flag_modify(args, ospf_area_nssa_suppress_fa_set,
+					     ospf_area_nssa_suppress_fa_unset);
 }
 
 
@@ -9105,29 +9095,8 @@ static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_are
  */
 static int routing_control_plane_protocols_control_plane_protocol_ospf_areas_area_stub_no_summary_modify(struct nb_cb_modify_args *args)
 {
-	struct ospf_area *area;
-	struct in_addr area_id;
-
-	switch (args->event) {
-	case NB_EV_VALIDATE:
-	case NB_EV_PREPARE:
-	case NB_EV_ABORT:
-		break;
-	case NB_EV_APPLY:
-		area = routing_ospf_area_get(args->dnode, true);
-		if (!area)
-			return NB_ERR_INCONSISTENCY;
-		if (routing_ospf_area_id(args->dnode, &area_id) < 0)
-			return NB_ERR_INCONSISTENCY;
-
-		if (yang_dnode_get_bool(args->dnode, NULL))
-			ospf_area_no_summary_set(area->ospf, area_id);
-		else
-			ospf_area_no_summary_unset(area->ospf, area_id);
-		break;
-	}
-
-	return NB_OK;
+	return routing_ospf_area_flag_modify(args, ospf_area_no_summary_set,
+					     ospf_area_no_summary_unset);
 }
 
 
